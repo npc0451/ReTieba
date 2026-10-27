@@ -6,6 +6,8 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.CacheControl
@@ -36,6 +38,7 @@ internal class TemporaryMediaFileLease internal constructor(
 ) : AutoCloseable {
     private val lock = Any()
     private var ownsFile = true
+    private val protection = MediaCacheFiles.protect(file)
 
     fun release() {
         val shouldDelete = synchronized(lock) {
@@ -44,7 +47,10 @@ internal class TemporaryMediaFileLease internal constructor(
                 true
             }
         }
-        if (shouldDelete) file.delete()
+        if (shouldDelete) {
+            protection.close()
+            MediaCacheFiles.deleteInactive(file)
+        }
     }
 
     internal fun moveTo(destination: File): File {
@@ -58,6 +64,7 @@ internal class TemporaryMediaFileLease internal constructor(
                 check(file.delete()) { "Unable to finalize media cache file" }
             }
             ownsFile = false
+            protection.close()
             return destination
         }
     }
@@ -95,22 +102,29 @@ internal class SecureMediaDownloader(
         }
         if (!allowed) throw MediaDownloadException("Unsupported media URL")
 
-        val privateDirectory = preparePrivateDirectory(directory)
-        removeExpiredTemporaryFiles(privateDirectory)
-        val suffix = when (kind) {
-            RemoteMediaKind.Image -> ".image"
-            RemoteMediaKind.Emoticon -> ".png"
-            RemoteMediaKind.Video -> ".mp4"
-            RemoteMediaKind.Audio -> ".audio"
-        }
-        val temporary = File.createTempFile("TiebaPure-", suffix, privateDirectory)
-        restrictToOwner(temporary)
+        var acquired: TemporaryMediaFileLease? = null
+        try {
+            withContext(Dispatchers.IO) {
+                val privateDirectory = preparePrivateDirectory(directory)
+                MediaCacheFiles.expire(privateDirectory)
+                val suffix = when (kind) {
+                    RemoteMediaKind.Image -> ".image"
+                    RemoteMediaKind.Emoticon -> ".png"
+                    RemoteMediaKind.Video -> ".mp4"
+                    RemoteMediaKind.Audio -> ".audio"
+                }
+                val lease = MediaCacheFiles.createTemporary(privateDirectory, suffix)
+                acquired = lease
+                restrictToOwner(lease.file)
+            }
+        } catch (error: Throwable) { acquired?.release(); throw error }
+        val lease = checkNotNull(acquired)
 
         return suspendCancellableCoroutine { continuation ->
             val operation = MediaDownloadOperation(
                 client = client,
                 sourceUrl = sourceUrl,
-                temporary = temporary,
+                lease = lease,
                 maximumBytes = maximumBytes,
                 kind = kind,
                 onProgress = onProgress,
@@ -125,16 +139,18 @@ internal class SecureMediaDownloader(
 private class MediaDownloadOperation(
     private val client: OkHttpClient,
     private val sourceUrl: String,
-    private val temporary: File,
+    private val lease: TemporaryMediaFileLease,
     private val maximumBytes: Long,
     private val kind: RemoteMediaKind,
     private val onProgress: (Float) -> Unit,
     private val continuation: CancellableContinuation<DownloadedTemporaryMedia>,
 ) {
+    private val temporary get() = lease.file
     private val lock = Any()
 
     @Volatile
     private var terminal = false
+    @Volatile private var cancelled = false
     private var activeCall: Call? = null
 
     fun start() {
@@ -146,10 +162,11 @@ private class MediaDownloadOperation(
         val call = synchronized(lock) {
             if (terminal) return
             terminal = true
+            cancelled = true
             activeCall.also { activeCall = null }
         }
         call?.cancel()
-        temporary.delete()
+        lease.release()
     }
 
     private fun enqueue(url: String, redirectCount: Int) {
@@ -257,7 +274,7 @@ private class MediaDownloadOperation(
         }
         reportProgress(1f)
         return DownloadedTemporaryMedia(
-            lease = TemporaryMediaFileLease(temporary),
+            lease = lease,
             mimeType = mimeType,
             byteCount = copiedBytes,
         )
@@ -286,7 +303,11 @@ private class MediaDownloadOperation(
                 true
             }
         }
-        temporary.delete()
+        if (shouldResume || cancelled) {
+            lease.release()
+            // Cancellation may have preceded opening the output stream; remove a recreated partial file too.
+            MediaCacheFiles.deleteInactive(temporary)
+        }
         if (shouldResume) continuation.resumeWith(Result.failure(error))
     }
 
@@ -383,11 +404,4 @@ private fun restrictToOwner(file: File) {
     check(file.setReadable(true, true) && file.setWritable(true, true)) {
         "Unable to restrict temporary media file"
     }
-}
-
-private fun removeExpiredTemporaryFiles(directory: File) {
-    val cutoff = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(24)
-    directory.listFiles().orEmpty()
-        .filter { it.isFile && it.name.startsWith("TiebaPure-") && it.lastModified() < cutoff }
-        .forEach(File::delete)
 }

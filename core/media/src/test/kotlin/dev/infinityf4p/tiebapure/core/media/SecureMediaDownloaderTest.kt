@@ -19,6 +19,38 @@ import okio.Buffer
 
 class SecureMediaDownloaderTest {
     @Test
+    fun cleanupKeepsAnInflightDownloadAndItsDeliveredLease() = withFixture { fixture ->
+        fixture.server.enqueue(MockResponse.Builder().addHeader("Content-Type", "video/mp4")
+            .body(Buffer().write(mp4Payload(4096))).build())
+        val started = java.util.concurrent.CountDownLatch(1)
+        val resume = java.util.concurrent.CountDownLatch(1)
+        val client = fixture.client.newBuilder().addInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            started.countDown()
+            check(resume.await(5, TimeUnit.SECONDS))
+            response
+        }.build()
+        val directory = fixture.newDirectory("video-playback")
+        val downloader = SecureMediaDownloader(directory, client, 512L * 1024, RemoteMediaKind.Video)
+        runBlocking {
+            var downloaded: DownloadedTemporaryMedia? = null
+            val job = launch(kotlinx.coroutines.Dispatchers.Default) {
+                downloaded = downloader.download("https://tb-video.bdstatic.com/tieba-smallvideo/demo.mp4")
+            }
+            try {
+                assertTrue(started.await(5, TimeUnit.SECONDS))
+                assertEquals(0L, MediaCacheFiles.clearTemporary(directory.parentFile!!))
+                assertTrue(MediaCacheFiles.isInUse(directory.listFiles()!!.single()))
+            } finally { resume.countDown() }
+            job.join()
+            val result = checkNotNull(downloaded)
+            try { assertEquals(0L, MediaCacheFiles.clearTemporary(directory.parentFile!!)) }
+            finally { result.lease.release() }
+            assertNoFiles(directory)
+        }
+    }
+
+    @Test
     fun directMp4DownloadsCompletelyAndLeaseDeletesFile() = withFixture { fixture ->
         fixture.server.enqueue(
             MockResponse.Builder()

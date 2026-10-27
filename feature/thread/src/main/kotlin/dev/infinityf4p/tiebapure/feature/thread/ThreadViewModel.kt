@@ -8,6 +8,7 @@ import dev.infinityf4p.tiebapure.core.model.Subpost
 import dev.infinityf4p.tiebapure.core.model.TiebaLikeObjectType
 import dev.infinityf4p.tiebapure.core.model.ThreadPage
 import dev.infinityf4p.tiebapure.core.model.ThreadReplySort
+import dev.infinityf4p.tiebapure.core.model.UserSummary
 import dev.infinityf4p.tiebapure.core.model.mutationOutcomeUnknownMessageOrNull
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
@@ -26,6 +27,10 @@ data class ThreadUiState(
     val posts: List<Post> = emptyList(),
     val sort: ThreadReplySort = ThreadReplySort.Hot,
     val onlyThreadAuthor: Boolean = false,
+    val appliedSort: ThreadReplySort = sort,
+    val appliedOnlyThreadAuthor: Boolean = onlyThreadAuthor,
+    val isChangingReplies: Boolean = false,
+    val replyChangeVersion: Long = 0,
     val isInitialLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
@@ -37,7 +42,10 @@ data class ThreadUiState(
     val isUpdatingCollection: Boolean = false,
     val isCollectionOutcomeUnknown: Boolean = false,
     val actionErrorMessage: String? = null,
-)
+) {
+    val hasPendingReplyFilters: Boolean
+        get() = page != null && (sort != appliedSort || onlyThreadAuthor != appliedOnlyThreadAuthor)
+}
 
 data class SubpostUiState(
     val parent: Post,
@@ -111,7 +119,8 @@ class ThreadViewModel(
     fun loadMore() {
         val snapshot = mutableState.value
         val page = snapshot.page ?: return
-        if (!page.hasMore || snapshot.isLoadingMore || snapshot.isRefreshing || snapshot.isInitialLoading) return
+        if (!page.hasMore || snapshot.isLoadingMore || snapshot.isRefreshing || snapshot.isInitialLoading ||
+            snapshot.isChangingReplies || snapshot.hasPendingReplyFilters) return
 
         failedLoadOperation = null
         val key = ThreadRequestKey(snapshot.sort, snapshot.onlyThreadAuthor, page.currentPage + 1)
@@ -154,7 +163,7 @@ class ThreadViewModel(
     }
 
     fun openSubposts(parent: Post) {
-        mutableState.update { it.copy(subposts = SubpostUiState(parent = parent)) }
+        mutableState.update { it.copy(subposts = SubpostUiState(parent = parent, items = parent.previewSubposts)) }
         loadSubposts(page = 1)
     }
 
@@ -179,6 +188,7 @@ class ThreadViewModel(
     }
 
     fun visibleReadingPositionChanged(position: ThreadReadingPosition) {
+        if (mutableState.value.isChangingReplies || mutableState.value.hasPendingReplyFilters) return
         if (position.postId == 0uL || position.floor <= 1) return
         pendingReadingPosition = position
         readingPositionJob?.cancel()
@@ -273,12 +283,17 @@ class ThreadViewModel(
         failedLoadOperation = null
         val key = ThreadRequestKey(requestState.sort, requestState.onlyThreadAuthor, page = 1)
         val generation = beginThreadRequest(key)
-        val showsRefreshIndicator = showRefresh && requestState.page != null
+        val changingReplies = requestState.page != null && (discardCurrentContent || requestState.hasPendingReplyFilters)
+        val showsRefreshIndicator = showRefresh && requestState.page != null && !changingReplies
+        if (discardCurrentContent) {
+            pendingRestorePosition = null
+            pendingInitialPostId = null
+            didResolveReadingPosition = true
+        }
         updateThreadStateIfCurrent(generation, key) {
             it.copy(
-                page = if (discardCurrentContent) null else it.page,
-                posts = if (discardCurrentContent) emptyList() else it.posts,
-                isInitialLoading = !showsRefreshIndicator,
+                isInitialLoading = it.page == null,
+                isChangingReplies = changingReplies,
                 isRefreshing = showsRefreshIndicator,
                 isLoadingMore = false,
                 errorMessage = null,
@@ -381,6 +396,10 @@ class ThreadViewModel(
                         posts = mergePosts(emptyList(), firstPage.posts, firstPage.mainPost?.id),
                         isInitialLoading = false,
                         isRefreshing = false,
+                        isChangingReplies = false,
+                        appliedSort = it.sort,
+                        appliedOnlyThreadAuthor = it.onlyThreadAuthor,
+                        replyChangeVersion = it.replyChangeVersion + if (changingReplies) 1 else 0,
                         readingPositionToRestore = readingPosition,
                         unknownLikeTargets = emptySet(),
                         isCollectionOutcomeUnknown = false,
@@ -394,6 +413,7 @@ class ThreadViewModel(
                     it.copy(
                         isInitialLoading = false,
                         isRefreshing = false,
+                        isChangingReplies = false,
                         errorMessage = error.userFacingMessage(),
                     )
                 }
@@ -541,12 +561,26 @@ class ThreadViewModel(
             updateSubpostStateIfCurrent(generation, key) { state ->
                 state.copy(subposts = state.subposts?.copy(isLoading = true, errorMessage = null))
             }
-            runCatching { repository.subpostPage(snapshot.parent, page) }
+            runCatching {
+                repository.subpostPage(snapshot.parent, page, mutableState.value.page?.forum?.id ?: error("帖子所属贴吧尚未加载，请刷新后重试"))
+                    .also { check(it.parentPost.id == snapshot.parent.id) { "楼中楼返回的父评论不匹配，请重试。" } }
+            }
                 .onSuccess { response ->
                     updateSubpostStateIfCurrent(generation, key) { state ->
                         val active = state.subposts ?: return@updateSubpostStateIfCurrent state
+                        val parent = response.parentPost.takeIf { it.id == active.parent.id }
+                            ?.let { active.parent.copy(
+                                floor = it.floor.takeIf { floor -> floor > 0 } ?: active.parent.floor,
+                                author = mergeKnownAuthor(active.parent.author, it.author),
+                            ) } ?: active.parent
                         state.copy(
+                            posts = state.posts.map { if (it.id == parent.id) mergeKnownPost(it, parent) else it },
+                            page = state.page?.let { page -> page.copy(
+                                mainPost = page.mainPost?.let { if (it.id == parent.id) mergeKnownPost(it, parent) else it },
+                                posts = page.posts.map { if (it.id == parent.id) mergeKnownPost(it, parent) else it },
+                            ) },
                             subposts = active.copy(
+                                parent = parent,
                                 items = mergeSubposts(
                                     if (page == 1) emptyList() else active.items,
                                     response.subposts,
@@ -650,21 +684,53 @@ internal fun mergePosts(
     current: List<Post>,
     incoming: List<Post>,
     mainPostId: ULong?,
-): List<Post> = buildList {
-    val ids = mutableSetOf<ULong>()
+): List<Post> = buildMap<ULong, Post> {
     (current + incoming).forEach { post ->
-        if (post.id != mainPostId && ids.add(post.id)) add(post)
+        if (post.id != mainPostId) put(post.id, get(post.id)?.let { mergeKnownPost(it, post) } ?: post)
     }
+}.values.toList()
+
+internal fun mergeKnownPost(current: Post, incoming: Post): Post {
+    require(current.id == incoming.id)
+    return incoming.copy(
+        floor = incoming.floor.takeIf { it > 0 } ?: current.floor,
+        blocks = incoming.blocks.ifEmpty { current.blocks },
+        ipAddress = incoming.ipAddress ?: current.ipAddress,
+        createdAtEpochSeconds = incoming.createdAtEpochSeconds ?: current.createdAtEpochSeconds,
+        previewSubposts = mergeSubposts(current.previewSubposts, incoming.previewSubposts),
+        subpostCount = incoming.subpostCount.takeIf { it > 0 } ?: current.subpostCount,
+        author = mergeKnownAuthor(current.author, incoming.author),
+    )
 }
 
-private fun mergeSubposts(current: List<Subpost>, incoming: List<Subpost>): List<Subpost> =
-    (current + incoming).distinctBy(Subpost::id)
+private fun mergeKnownAuthor(current: UserSummary, incoming: UserSummary): UserSummary = when {
+    incoming.id <= 0 -> current
+    incoming.id != current.id -> incoming
+    else -> incoming.copy(
+        name = incoming.name.ifBlank { current.name }, displayName = incoming.displayName.ifBlank { current.displayName },
+        portrait = incoming.portrait.ifBlank { current.portrait }, level = incoming.level ?: current.level,
+        levelName = incoming.levelName ?: current.levelName, ipAddress = incoming.ipAddress ?: current.ipAddress,
+    )
+}
+
+internal fun mergeSubposts(current: List<Subpost>, incoming: List<Subpost>): List<Subpost> =
+    (current + incoming).fold(linkedMapOf<ULong, Subpost>()) { result, post ->
+        val known = result[post.id]
+        result[post.id] = post.copy(
+            floor = post.floor.takeIf { it > 0 } ?: known?.floor ?: 0,
+            blocks = post.blocks.ifEmpty { known?.blocks.orEmpty() },
+            author = known?.let { mergeKnownAuthor(it.author, post.author) } ?: post.author,
+        )
+        result
+    }.values.toList()
 
 private fun mergeThreadMetadata(current: ThreadPage?, next: ThreadPage): ThreadPage = next.copy(
     thread = current?.thread?.let { previous ->
         next.thread.copy(isLiked = previous.isLiked, likeCount = previous.likeCount)
     } ?: next.thread,
-    mainPost = current?.mainPost ?: next.mainPost,
+    mainPost = current?.mainPost?.let { known ->
+        next.mainPost?.takeIf { it.id == known.id }?.let { mergeKnownPost(known, it) } ?: known
+    } ?: next.mainPost,
     mainPostIsSummaryFallback = current?.mainPostIsSummaryFallback ?: next.mainPostIsSummaryFallback,
     isCollected = current?.isCollected ?: next.isCollected,
 )

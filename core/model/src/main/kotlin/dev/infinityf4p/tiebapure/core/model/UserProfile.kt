@@ -2,6 +2,8 @@ package dev.infinityf4p.tiebapure.core.model
 
 enum class UserContentVisibility { Visible, Private }
 
+data class UserForumsPage(val forums: List<Forum>, val currentPage: Int, val hasMore: Boolean)
+
 enum class UserProfileSex(val mutationProtocolValue: Int?) {
     Male(1),
     Female(2),

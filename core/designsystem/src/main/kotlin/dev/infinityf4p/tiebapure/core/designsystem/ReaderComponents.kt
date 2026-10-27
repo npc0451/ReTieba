@@ -1,6 +1,8 @@
 package dev.infinityf4p.tiebapure.core.designsystem
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
@@ -8,10 +10,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,13 +54,33 @@ sealed interface ReaderState {
     data class Error(val title: String, val message: String, val retryLabel: String = "重试") : ReaderState
 }
 
-/** A white/content surface on the grouped reader background, matching iOS ReaderCard. */
+
+@Composable
+fun ReaderPageHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    Row(modifier.fillMaxWidth().heightIn(min = 56.dp)
+        .background(MaterialTheme.colorScheme.background)
+        .padding(start = if (onBack == null) 16.dp else 4.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        onBack?.let { back -> IconButton(onClick = back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") } }
+        Text(title, Modifier.weight(1f).padding(vertical = 8.dp), style = MaterialTheme.typography.titleMedium,
+            maxLines = 2, overflow = TextOverflow.Ellipsis)
+        actions()
+    }
+}
+
+/** Shared content surface for both reader themes. */
 @Composable
 fun ReaderCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 8.dp,
+    cornerRadius: Dp = 4.dp,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     onClick: (() -> Unit)? = null,
+    border: BorderStroke? = null,
     content: @Composable () -> Unit,
 ) {
     val cardModifier = modifier
@@ -62,6 +94,8 @@ fun ReaderCard(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
+        border = border,
+        shape = RoundedCornerShape(cornerRadius),
     ) {
         Box(Modifier.padding(contentPadding)) { content() }
     }
@@ -82,89 +116,99 @@ fun ReaderSectionBand(
     }
 }
 
+/** A shallow edge between groups; real nested replies use a quieter hairline. */
+@Composable
+fun ReaderContentDivider(modifier: Modifier = Modifier, nested: Boolean = false) {
+    val colors = MaterialTheme.colorScheme
+    val edge = colors.outlineVariant.copy(alpha = if (nested) .5f else .65f)
+    val highlight = colors.surface.copy(alpha = .8f)
+    Box(modifier.fillMaxWidth().height(if (nested) 1.dp else 6.dp)
+        .background(colors.surfaceContainerLow).drawBehind {
+            drawLine(edge, Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), strokeWidth = .5.dp.toPx())
+            if (!nested) drawLine(highlight, Offset(0f, size.height - .5.dp.toPx()), Offset(size.width, size.height - .5.dp.toPx()), strokeWidth = 1.dp.toPx())
+        })
+}
+
+fun threadIdentityAvatarUrl(thread: dev.infinityf4p.tiebapure.core.model.ThreadSummary): String? =
+    if (thread.forumRoute() != null) thread.forumAvatarUrl else thread.author.portrait
+
 @Composable
 fun ReaderInteractionStats(
     comments: Int?,
     likes: Int?,
     modifier: Modifier = Modifier,
-    isLiked: Boolean = false,
-    isLikeUpdating: Boolean = false,
     onCommentsClick: (() -> Unit)? = null,
-    onLikesClick: (() -> Unit)? = null,
-    commentsIcon: ImageVector,
-    likesIcon: ImageVector,
-    likedIcon: ImageVector = likesIcon,
+    alignEnd: Boolean = false,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val hasTwoStats = comments != null && likes != null
-        if (hasTwoStats) Spacer(Modifier.weight(0.5f))
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.spacedBy(8.dp)) {
+        likes?.takeIf { it > 0 }?.let {
+            ReaderInteractionStat(it, "点赞数", ReaderIcons.Upvote, null)
+        }
         comments?.let {
-            ReaderInteractionStat(
-                value = it,
-                label = "评论",
-                icon = commentsIcon,
-                selected = false,
-                enabled = true,
-                onClick = onCommentsClick,
-                modifier = Modifier.weight(1f),
-            )
+            ReaderInteractionStat(it, "评论", ReaderIcons.Comment, onCommentsClick)
         }
-        likes?.let {
-            ReaderInteractionStat(
-                value = it,
-                label = if (isLiked) "取消点赞" else "点赞",
-                icon = if (isLiked) likedIcon else likesIcon,
-                selected = isLiked,
-                enabled = !isLikeUpdating,
-                onClick = onLikesClick,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        if (hasTwoStats) Spacer(Modifier.weight(0.5f))
     }
 }
 
 @Composable
-private fun ReaderInteractionStat(
-    value: Int,
-    label: String,
-    icon: ImageVector,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: (() -> Unit)?,
-    modifier: Modifier,
-) {
-    val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-    val semantics = Modifier.semantics {
-        contentDescription = if (label == "评论") "评论，当前${value}条评论" else "$label，当前${value}个赞"
-    }
-    val content: @Composable () -> Unit = {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = tint)
-            Text(
-                compactInteractionCount(value),
-                style = MaterialTheme.typography.bodyMedium,
-                color = tint,
-                maxLines = 1,
-            )
+fun ReaderShareAction(onClick: () -> Unit) {
+    Box(Modifier.size(48.dp).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = "分享帖子" }, contentAlignment = Alignment.Center) {
+        Surface(shape = RoundedCornerShape(50), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), color = MaterialTheme.colorScheme.surface) {
+            Icon(ReaderIcons.Share, null, Modifier.padding(horizontal = 10.dp, vertical = 4.dp).size(20.dp))
         }
     }
-    if (onClick == null) {
-        Box(modifier.heightIn(min = 48.dp).then(semantics), contentAlignment = Alignment.Center) { content() }
-    } else {
-        TextButton(
-            onClick = onClick,
-            modifier = modifier.heightIn(min = 48.dp).then(semantics),
-            enabled = enabled,
-            colors = ButtonDefaults.textButtonColors(contentColor = tint, disabledContentColor = tint.copy(alpha = 0.5f)),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) { content() }
+}
+
+@Composable
+fun ReaderCommunityRow(
+    name: String,
+    time: String?,
+    onOpen: () -> Unit,
+    avatar: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    subscribed: Boolean = false,
+    onSubscribe: (() -> Unit)? = null,
+    more: @Composable () -> Unit = {},
+) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.weight(1f).heightIn(min = 48.dp).clickable(onClick = onOpen), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            avatar()
+            Text(name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelLarge,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            time?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        Row(Modifier.offset(x = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            onSubscribe?.let { action ->
+                Box(Modifier.heightIn(min = 48.dp).clickable(onClick = action), contentAlignment = Alignment.Center) {
+                    Surface(shape = RoundedCornerShape(50), color = if (subscribed) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.inverseSurface) {
+                        Text(if (subscribed) "已订阅" else "订阅", Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (subscribed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.inverseOnSurface)
+                    }
+                }
+            }
+            more()
+        }
+    }
+}
+
+@Composable
+private fun ReaderInteractionStat(value: Int, label: String, icon: ImageVector, onClick: (() -> Unit)?) {
+    val base = Modifier.heightIn(min = 48.dp).semantics {
+        contentDescription = if (label == "评论") "评论，当前${value}条评论" else "$label，当前${value}个赞"
+    }
+    Box(if (onClick == null) base else base.clickable(role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
+        Surface(modifier = Modifier.heightIn(min = 30.dp), shape = RoundedCornerShape(50),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), color = MaterialTheme.colorScheme.surface) {
+            Row(Modifier.padding(horizontal = 11.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                Text(compactInteractionCount(value), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
     }
 }
 
@@ -236,9 +280,10 @@ fun ReaderSectionHeader(
     title: String,
     modifier: Modifier = Modifier,
     trailing: String? = null,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = modifier.fillMaxWidth().padding(contentPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -262,22 +307,24 @@ fun ReaderNavigationRow(
     subtitle: String? = null,
     trailing: String? = null,
     enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .combinedClickable(enabled = enabled, role = Role.Button, onClick = onClick,
+                onLongClick = onLongClick, onLongClickLabel = if (onLongClick == null) null else "更多操作")
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         icon?.let {
-            Icon(it, contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(it, contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
             subtitle?.let {
                 Text(
                     it,
@@ -290,8 +337,12 @@ fun ReaderNavigationRow(
         }
         trailing?.let {
             Spacer(Modifier.width(12.dp))
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(0.4f), maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
+        Spacer(Modifier.width(8.dp))
+        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null,
+            modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     HorizontalDivider(modifier = Modifier.padding(start = if (icon == null) 16.dp else 50.dp))
 }

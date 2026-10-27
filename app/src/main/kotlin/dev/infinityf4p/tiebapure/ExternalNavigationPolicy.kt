@@ -65,7 +65,7 @@ private fun parseExternalNavigationUri(raw: String): ExternalNavigationDestinati
     val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return null
     return when {
         uri.scheme.equals("https", ignoreCase = true) -> parseTiebaWebThread(uri)
-        uri.scheme.equals("tiebapure", ignoreCase = true) -> parseTiebaPureUri(uri)
+        uri.scheme.equals("tiebareaderdev", ignoreCase = true) -> parseTiebaPureUri(uri)
         else -> null
     }
 }

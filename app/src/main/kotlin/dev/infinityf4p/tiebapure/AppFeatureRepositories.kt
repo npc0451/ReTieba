@@ -50,15 +50,16 @@ class AppFeatureRepositories(
     private val repositories: TiebaRepositories,
     private val database: TiebaPureDatabase,
     private val account: () -> Account?,
-    private val accountRepository: AccountRepository,
-    private val mutationRepository: AccountMutationRepository,
     private val settings: () -> AppSettings,
     private val applicationScope: CoroutineScope,
 ) {
-    private val forumIdsByThread = ConcurrentHashMap<Long, Long>()
-    private val threadPagesById = ConcurrentHashMap<Long, dev.infinityf4p.tiebapure.core.model.ThreadPage>()
-    private val threadSummariesById = ConcurrentHashMap<Long, ThreadSummary>()
+    private val threadSummariesById = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<Long, ThreadSummary>(128, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ThreadSummary>?) = size > 128
+        },
+    )
     private val readingPositionMutex = Mutex()
+    private val readingGeneration = java.util.concurrent.atomic.AtomicLong()
     private val readingPositionGenerations = ConcurrentHashMap<Long, Long>()
     private val sessionCacheLock = Any()
     private var sessionCacheGeneration = 0L
@@ -85,12 +86,7 @@ class AppFeatureRepositories(
     }
 
     val forumHub: ForumHubRepository = object : ForumHubRepository {
-        override suspend fun followedForums(): List<Forum> {
-            val blocklist = blockedEntries()
-            return account()?.let { accountRepository.followedForums(it) }
-                .orEmpty()
-                .filter { TiebaContentFilterPolicy.shouldKeep(it, blocklist) }
-        }
+        override suspend fun followedForums(): List<Forum> = emptyList()
 
         override fun recentForums() = combine(
             database.recentForumDao().observeAll(),
@@ -110,32 +106,14 @@ class AppFeatureRepositories(
         }
 
         override suspend fun removeRecent(forum: Forum) {
-            database.recentForumDao().remove(forum.name.trim().removeSuffix("吧").trim().lowercase())
+            val key = recentForumEntity(forum, visitedAtMilliseconds = 0)?.normalizedName ?: return
+            database.recentForumDao().remove(key)
         }
 
         override suspend fun clearRecent() = database.recentForumDao().clear()
     }
 
-    val forumInteraction: ForumInteractionPort = object : ForumInteractionPort {
-        override val followAvailability: ForumFollowAvailability
-            get() = if (account() == null) ForumFollowAvailability.LoginRequired else ForumFollowAvailability.Available
-
-        override suspend fun resolveForumId(forum: Forum): Long =
-            forum.id.takeIf { it > 0 }
-                ?: accountRepository.resolveForumId(forum.name.trim().removeSuffix("吧").trim())
-
-        override suspend fun forumMembership(forum: Forum): ForumMembership {
-            val forumId = resolveForumId(forum)
-            return withRequiredAccount { current -> accountRepository.forumMembership(current, forumId) }
-        }
-
-        override suspend fun setForumFollowed(forum: Forum, followed: Boolean): ForumMembership {
-            val resolved = forum.copy(id = resolveForumId(forum))
-            return withRequiredAccount { current ->
-                mutationRepository.setForumFollowed(current, resolved, followed)
-            }
-        }
-    }
+    val forumInteraction: ForumInteractionPort = dev.infinityf4p.tiebapure.feature.forum.UnavailableForumInteractionPort
 
     val forumThreads: ForumThreadsRepository = ForumThreadsRepository { forum, page, category ->
         val cacheGeneration = currentSessionCacheGeneration()
@@ -257,12 +235,12 @@ class AppFeatureRepositories(
         override suspend fun subpostPage(
             parentPost: dev.infinityf4p.tiebapure.core.model.Post,
             page: Int,
+            forumId: Long,
         ) = TiebaContentFilterPolicy.filter(
             repositories.thread.subposts(
                 threadId = parentPost.threadId,
                 postId = parentPost.id,
-                forumId = forumIdsByThread[parentPost.threadId]
-                    ?: error("帖子所属贴吧尚未加载，请刷新后重试"),
+                forumId = forumId.takeIf { it > 0 } ?: error("帖子所属贴吧尚未加载，请刷新后重试"),
                 page = page,
                 account = account(),
             ),
@@ -323,24 +301,7 @@ class AppFeatureRepositories(
             }
         }
 
-        override suspend fun setLiked(threadId: Long, target: ThreadLikeTarget, liked: Boolean) {
-            check(settings().likingEnabled) { "请先在设置中开启允许点赞。" }
-            withRequiredAccount { current ->
-                mutationRepository.setPostLiked(
-                    account = current,
-                    threadId = threadId,
-                    postId = target.postId,
-                    objectType = target.objectType,
-                    liked = liked,
-                )
-            }
-        }
 
-        override suspend fun setCollected(threadId: Long, markedPostId: ULong, collected: Boolean) {
-            withRequiredAccount { current ->
-                mutationRepository.setThreadFavorite(current, threadId, markedPostId, collected)
-            }
-        }
     }
 
     fun rememberThreadSummary(thread: ThreadSummary) {
@@ -351,52 +312,8 @@ class AppFeatureRepositories(
     fun clearSessionCaches() {
         synchronized(sessionCacheLock) {
             sessionCacheGeneration += 1
-            forumIdsByThread.clear()
-            threadPagesById.clear()
             threadSummariesById.clear()
         }
-    }
-
-    fun contentSubmissionTarget(threadId: Long, reply: ThreadReplyTarget): ContentSubmissionTarget? {
-        val page = threadPagesById[threadId] ?: return null
-        val forumId = page.forum.id.takeIf { it > 0 } ?: forumIdsByThread[threadId] ?: return null
-        val forumName = page.forum.name.trim().removeSuffix("吧").trim().takeIf(String::isNotEmpty) ?: return null
-        return when (reply) {
-            ThreadReplyTarget.Thread -> ContentSubmissionTarget(
-                kind = ContentSubmissionKind.ThreadReply,
-                forumId = forumId,
-                forumName = forumName,
-                threadId = threadId,
-            )
-            is ThreadReplyTarget.Floor -> ContentSubmissionTarget(
-                kind = ContentSubmissionKind.PostReply,
-                forumId = forumId,
-                forumName = forumName,
-                threadId = threadId,
-                parentPostId = reply.post.id,
-                parentFloor = reply.post.floor,
-                replyUser = reply.post.author,
-            )
-            is ThreadReplyTarget.Nested -> ContentSubmissionTarget(
-                kind = ContentSubmissionKind.SubpostReply,
-                forumId = forumId,
-                forumName = forumName,
-                threadId = threadId,
-                parentPostId = reply.parent.id,
-                parentFloor = reply.parent.floor,
-                subpostId = reply.subpost.id,
-                replyUser = reply.subpost.author,
-            )
-        }
-    }
-
-    private suspend fun <T> withRequiredAccount(block: suspend (Account) -> T): T {
-        val snapshot = account() ?: error("请先登录贴吧账号后再执行此操作。")
-        val result = block(snapshot)
-        check(account()?.sessionIdentity() == snapshot.sessionIdentity()) {
-            "登录账号已切换，请重试当前操作。"
-        }
-        return result
     }
 
     private suspend fun blockedEntries(): TiebaBlocklistSnapshot =
@@ -426,13 +343,11 @@ class AppFeatureRepositories(
         synchronized(sessionCacheLock) {
             if (sessionCacheGeneration != expectedGeneration) return
             rememberThreadSummaryLocked(page.thread)
-            page.forum.id.takeIf { it > 0 }?.let { forumIdsByThread[threadId] = it }
-            threadPagesById[threadId] = page
         }
     }
 
     private fun nextReadingPositionGeneration(threadId: Long): Long = synchronized(readingPositionGenerations) {
-        val next = (readingPositionGenerations[threadId] ?: 0L) + 1L
+        val next = readingGeneration.incrementAndGet()
         readingPositionGenerations[threadId] = next
         next
     }
@@ -444,14 +359,14 @@ class AppFeatureRepositories(
     ) {
         readingPositionMutex.withLock {
             if (readingPositionGenerations[threadId] != generation) return
-            database.readingPositionDao().upsert(
+            try { database.readingPositionDao().upsert(
                 ReadingPositionEntity(
                     threadId = threadId,
                     postId = position.postId.toString(),
                     floor = position.floor,
                     updatedAtMilliseconds = System.currentTimeMillis(),
                 ),
-            )
+            ) } finally { readingPositionGenerations.remove(threadId, generation) }
         }
     }
 

@@ -37,10 +37,10 @@ class AppNavigationPolicyTest {
     }
 
     @Test
-    fun compactRootNavigationIsHiddenForThreadAndComposerOnly() {
+    fun compactRootNavigationIsHiddenForReadingAndSearchTasks() {
         assertFalse(shouldShowCompactRootNavigation("thread/{threadId}?postId={postId}"))
         assertFalse(shouldShowCompactRootNavigation("compose/{kind}/{forumId}"))
-        assertTrue(shouldShowCompactRootNavigation("search?query={query}"))
+        assertFalse(shouldShowCompactRootNavigation("search?query={query}"))
         assertTrue(shouldShowCompactRootNavigation("user/{userId}/{userName}"))
         assertTrue(shouldShowCompactRootNavigation("home"))
         assertTrue(shouldShowCompactRootNavigation(null))

@@ -1,128 +1,67 @@
 package dev.infinityf4p.tiebapure
 
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
+import dev.infinityf4p.tiebapure.core.media.MediaCacheFiles
+import dev.infinityf4p.tiebapure.core.media.ReaderCachePreferences
 import android.content.Context
 import android.os.Build
-import dev.infinityf4p.tiebapure.core.data.AccountCredentialVault
+import dev.infinityf4p.tiebapure.core.data.AppSettings
 import dev.infinityf4p.tiebapure.core.data.AppSettingsStore
-import dev.infinityf4p.tiebapure.core.data.NetworkAccountMutationRepository
-import dev.infinityf4p.tiebapure.core.data.NetworkAccountRepository
-import dev.infinityf4p.tiebapure.core.data.NetworkAuthenticationRepository
 import dev.infinityf4p.tiebapure.core.data.TiebaPureDatabase
 import dev.infinityf4p.tiebapure.core.data.TiebaRepositories
-import dev.infinityf4p.tiebapure.core.model.Account
 import dev.infinityf4p.tiebapure.core.model.ReaderFontFamily
-import dev.infinityf4p.tiebapure.core.model.UserProfile
-import dev.infinityf4p.tiebapure.core.network.DefaultTiebaAccountService
+import dev.infinityf4p.tiebapure.core.network.AnonymousReadInterceptor
 import dev.infinityf4p.tiebapure.core.network.DefaultTiebaReadService
-import dev.infinityf4p.tiebapure.core.network.DefaultTiebaWriteService
 import dev.infinityf4p.tiebapure.core.network.TiebaDeviceProfile
 import dev.infinityf4p.tiebapure.core.network.TiebaHttpClientFactory
 import dev.infinityf4p.tiebapure.core.network.TiebaRequestBuilder
 import dev.infinityf4p.tiebapure.core.network.TiebaTransport
-import dev.infinityf4p.tiebapure.feature.account.clearBaiduWebSession
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
-    private val credentialVault = AccountCredentialVault(appContext)
     val settings = AppSettingsStore(appContext)
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    val currentSettings = settings.values.stateIn(
-        scope = applicationScope,
-        started = SharingStarted.Eagerly,
-        initialValue = dev.infinityf4p.tiebapure.core.data.AppSettings(),
-    )
+    internal val cacheMaintenance = ReaderCacheMaintenance(applicationScope) { pressure ->
+        MediaCacheFiles.maintain(appContext.cacheDir,
+            ReaderCachePreferences.imageLimitMb(appContext).toLong() * 1_024 * 1_024, storageLow = pressure)
+    }
+    val currentSettings = settings.values.stateIn(applicationScope, SharingStarted.Eagerly, AppSettings())
     val database = TiebaPureDatabase.getInstance(appContext)
+    val localLibrary = dev.infinityf4p.tiebapure.core.data.LocalLibraryRepository(database)
+    val localUsers = dev.infinityf4p.tiebapure.core.data.LocalUserFollowsRepository(database)
     val readerFonts = AppReaderFontStore(appContext)
-
     private val requestBuilder = TiebaRequestBuilder(deviceProfile(appContext))
-    private val transport = TiebaTransport(TiebaHttpClientFactory.create())
-    private val readService = DefaultTiebaReadService(
-        transport = transport,
-        requestBuilder = requestBuilder,
-    )
-    private val accountService = DefaultTiebaAccountService(transport, requestBuilder)
-    private val writeService = DefaultTiebaWriteService(transport, accountService, requestBuilder)
-    private val accountSessions = AppAccountSessionController(
-        initialState = credentialVault.load(),
-        saveState = credentialVault::save,
-        clearState = credentialVault::clear,
-        activateSession = writeService::activateSession,
-        invalidateAndDrain = writeService::invalidateAndDrain,
-    )
-    val account: StateFlow<Account?> = accountSessions.account
-    val accounts: StateFlow<List<Account>> = accountSessions.accounts
-    val sessionExpiration = SessionExpirationCoordinator(
-        currentAccount = { account.value },
-        logOut = ::removeCurrentAccount,
-    )
-    val authenticationRepository = NetworkAuthenticationRepository(accountService)
-    val accountRepository = NetworkAccountRepository(accountService)
-        .monitorSessions(sessionExpiration::report)
-    val mutationRepository = NetworkAccountMutationRepository(writeService)
-        .monitorSessions(sessionExpiration::report)
-    val repositories = TiebaRepositories.network(readService)
-        .monitorSessions(sessionExpiration::report)
+    private val transport = TiebaTransport(TiebaHttpClientFactory.create {
+        addInterceptor(AnonymousReadInterceptor())
+    })
+    val repositories = TiebaRepositories.network(DefaultTiebaReadService(transport, requestBuilder))
+    internal val subscriptionFeed = AppSubscriptionFeedSource(database, repositories.forum, repositories.user, settings)
+
+    suspend fun subscribe(forum: dev.infinityf4p.tiebapure.core.model.Forum) {
+        localLibrary.subscribe(verifiedSubscriptionForum(forum, repositories.forum))
+    }
     val savedThreadMedia = AppSavedThreadMediaStore(appContext)
-    val savedThreads = AppSavedThreadRepository(
-        database = database,
-        repositories = repositories,
-        account = { account.value },
-        mediaStore = savedThreadMedia,
-        context = appContext,
-    )
+    val savedThreads = AppSavedThreadRepository(database, repositories, { null }, savedThreadMedia, appContext)
     val featureRepositories = AppFeatureRepositories(
         repositories = repositories,
         database = database,
-        account = { account.value },
-        accountRepository = accountRepository,
-        mutationRepository = mutationRepository,
+        account = { null },
         settings = { currentSettings.value },
         applicationScope = applicationScope,
     )
-    val accountFeatures = AppAccountFeatureRepositories(
-        account = account,
-        accounts = accounts,
-        saveAccount = ::replaceAccount,
-        clearAccount = ::logOut,
-        activateSavedAccount = ::switchAccount,
-        removeSavedAccount = ::removeAccount,
-        database = database,
-        repositories = repositories,
-        authenticationRepository = authenticationRepository,
-        accountRepository = accountRepository,
-        mutationRepository = mutationRepository,
-    )
+    val readerRepositories = AppReaderRepositories(database, repositories)
     val settingsRepository = AppSettingsRepository(settings, database, readerFonts)
-    val settingsAccountActions = AppSettingsAccountActions(
-        account = account,
-        accountRepository = accountRepository,
-        mutationRepository = mutationRepository,
-        onLogout = ::removeCurrentAccount,
-        automaticSignStore = AutomaticSignStore(appContext),
-    )
-    val composerRepository = AppComposerRepository(
-        account,
-        database,
-        mutationRepository,
-        AppDraftFileStore(appContext),
-        submissionAllowed = { kind ->
-            val current = currentSettings.value
-            contentSubmissionEnabled(kind, current.postingEnabled, current.replyingEnabled)
-        },
-    )
-    var profilePendingEdit: UserProfile? = null
-        private set
 
     init {
         applicationScope.launch {
@@ -133,56 +72,13 @@ class AppContainer(context: Context) {
                 settings.setReadingPreferences(persisted.reading.copy(fontFamily = ReaderFontFamily.System))
             }
         }
-        applicationScope.launch { composerRepository.repairStorage() }
         applicationScope.launch { savedThreads.repairStorage() }
-        applicationScope.launch {
-            combine(account, currentSettings) { activeAccount, activeSettings ->
-                activeAccount?.sessionIdentity() to activeSettings.autoSignEnabled
+        cacheMaintenance.request()
+        ContextCompat.registerReceiver(appContext, object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_DEVICE_STORAGE_LOW) cacheMaintenance.request(storagePressure = true)
             }
-                .distinctUntilChanged()
-                .collect { (session, enabled) ->
-                    if (session != null && enabled) {
-                        runCatching { settingsAccountActions.signAutomaticallyIfNeeded() }
-                    }
-                }
-        }
-    }
-
-    fun stageProfileEdit(profile: UserProfile?) {
-        profilePendingEdit = profile
-    }
-
-    private suspend fun replaceAccount(expectedCurrent: Account?, value: Account) {
-        if (accountSessions.addOrReplace(value, expectedCurrent)) resetSessionState()
-    }
-
-    suspend fun logOut() {
-        account.value?.let { removeCurrentAccount(it) }
-    }
-
-    suspend fun switchAccount(accountId: String) {
-        if (accountSessions.switchTo(accountId)) resetSessionState()
-    }
-
-    suspend fun removeAccount(accountId: String) {
-        val sessionChanged = accountSessions.remove(accountId)
-        if (sessionChanged) {
-            resetSessionState()
-            clearBaiduWebSession()
-        }
-    }
-
-    private suspend fun removeCurrentAccount(expected: Account) {
-        if (accountSessions.removeCurrent(expected)) {
-            resetSessionState()
-            clearBaiduWebSession()
-        }
-    }
-
-    private fun resetSessionState() {
-        profilePendingEdit = null
-        featureRepositories.clearSessionCaches()
-        sessionExpiration.dismissNotice()
+        }, IntentFilter(Intent.ACTION_DEVICE_STORAGE_LOW), ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     private fun deviceProfile(context: Context): TiebaDeviceProfile {

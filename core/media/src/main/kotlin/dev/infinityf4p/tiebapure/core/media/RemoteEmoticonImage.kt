@@ -48,6 +48,8 @@ fun RemoteEmoticonImage(
     val context = LocalContext.current.applicationContext
     val loader = remember(context) { TiebaEmoticonImageLoader.get(context) }
     var imageFile by remember(imageUrl, loadsAutomatically) { mutableStateOf<File?>(null) }
+    val leases = remember(imageUrl, loadsAutomatically) { mutableListOf<MediaFileReadLease>() }
+    androidx.compose.runtime.DisposableEffect(imageUrl, loadsAutomatically) { onDispose { leases.forEach { it.close() } } }
     var manuallyAuthorized by remember(imageUrl, loadsAutomatically) { mutableStateOf(false) }
     val shouldLoad = loadsAutomatically || manuallyAuthorized
 
@@ -55,7 +57,9 @@ fun RemoteEmoticonImage(
         imageFile = null
         if (!shouldLoad || imageUrl == null) return@LaunchedEffect
         try {
-            imageFile = loader.load(imageUrl)
+            val lease = loader.acquire(imageUrl)
+            leases += lease
+            imageFile = lease.file
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
@@ -106,12 +110,14 @@ private class TiebaEmoticonFileLoader private constructor(context: Context) {
     private val cacheDirectory = File(context.cacheDir, "tieba-emoticons")
     private val downloader = SecureMediaDownloader(
         directory = cacheDirectory,
-        suppliedClient = OkHttpClient(),
+        suppliedClient = defaultMediaHttpClient,
         maximumBytes = MAXIMUM_ARTWORK_BYTES,
         kind = RemoteMediaKind.Emoticon,
     )
     private val downloadLocks = Array(8) { Mutex() }
     private val downloadPermits = Semaphore(4)
+
+    suspend fun acquire(url: String): MediaFileReadLease = acquireMediaFile(File(cacheDirectory, "${url.sha256()}.png")) { load(url) }
 
     suspend fun load(url: String): File {
         val lock = downloadLocks[(url.hashCode() and Int.MAX_VALUE) % downloadLocks.size]
@@ -145,16 +151,17 @@ private class TiebaEmoticonFileLoader private constructor(context: Context) {
     }
 
     private fun pruneCache(preserving: File) {
-        val files = cacheDirectory.listFiles().orEmpty()
-            .filter { it.isFile && !it.name.startsWith("TiebaPure-") }
+        val files = cacheDirectory.canonicalFile.listFiles().orEmpty()
+            .filter { it.isFile && it.canonicalFile == it.absoluteFile && MediaCacheFiles.isEmoticonName(it.name) }
+        val retained = preserving.canonicalFile
         var totalBytes = files.sumOf(File::length)
         var entryCount = files.size
-        files.filter { it != preserving }
+        files.filter { it != retained }
             .sortedWith(compareBy<File>(File::lastModified).thenBy(File::getName))
             .forEach { candidate ->
                 if (totalBytes <= MAXIMUM_CACHE_BYTES && entryCount <= MAXIMUM_CACHE_ENTRIES) return
                 val bytes = candidate.length()
-                if (candidate.delete()) {
+                if (MediaCacheFiles.deleteInactive(candidate)) {
                     totalBytes -= bytes
                     entryCount -= 1
                 }

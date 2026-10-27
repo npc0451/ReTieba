@@ -689,6 +689,31 @@ private fun SavedThreadMetadata.toListItem(): SavedThreadListItem {
 private class SavedThreadSnapshotTooLargeException : IllegalStateException("帖子内容超过本机保存大小上限。")
 
 internal object SavedThreadBlobCodec {
+    fun encodeSummaries(threads: List<ThreadSummary>): ByteArray {
+        val payload = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.writeInt(0x54504631)
+                output.writeCollection(threads) { writeThread(it) }
+            }
+            bytes.toByteArray()
+        }
+        require(payload.size + CHECKSUM_BYTES <= MAXIMUM_BYTES) { "订阅摘要缓存过大。" }
+        return payload + MessageDigest.getInstance("SHA-256").digest(payload)
+    }
+
+    fun decodeSummaries(encoded: ByteArray): List<ThreadSummary> {
+        require(encoded.size in (CHECKSUM_BYTES + 8)..MAXIMUM_BYTES)
+        val payload = encoded.copyOfRange(0, encoded.size - CHECKSUM_BYTES)
+        check(MessageDigest.isEqual(encoded.copyOfRange(payload.size, encoded.size),
+            MessageDigest.getInstance("SHA-256").digest(payload)))
+        return DataInputStream(ByteArrayInputStream(payload)).use { input ->
+            check(input.readInt() == 0x54504631)
+            val threads = input.readCollection { readThread() }
+            check(input.available() == 0)
+            threads
+        }
+    }
+
     private const val MAGIC = 0x54505354
     private const val VERSION = 3
     private const val CHECKSUM_BYTES = 32

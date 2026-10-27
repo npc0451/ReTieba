@@ -282,6 +282,8 @@ internal fun Throwable.readableMessage(): String =
     message?.takeIf(String::isNotBlank) ?: "加载失败，请稍后重试。"
 
 data class HomeCallbacks(
+    val isSubscribed: (Forum) -> Boolean = { false },
+    val onSubscribe: ((Forum) -> Unit)? = null,
     val canLike: Boolean = false,
     val onOpenSearch: () -> Unit = {},
     val onOpenThread: (ThreadSummary) -> Unit = {},
@@ -291,4 +293,5 @@ data class HomeCallbacks(
     val onBlockForum: (Forum) -> Unit = {},
     val onToggleLike: ((ThreadSummary) -> Unit)? = null,
     val onOpenMedia: (ThreadSummary, Int) -> Unit = { _, _ -> },
+    val onShare: ((ThreadSummary) -> Unit)? = null,
 )

@@ -9,6 +9,9 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +29,65 @@ import org.junit.Test
 
 class ForumScreenTest {
     @get:Rule val composeRule = createComposeRule()
+
+    @Test
+    fun wholeThreadOpensWhileAuthorAndMediaKeepTheirActions() {
+        val thread = testThread(12, "整行点击").copy(
+            replyCount = 4,
+            blocks = listOf(ContentBlock.Image(ImageContent("https://tiebapic.baidu.com/forum.jpg", null, 1, 1, false))),
+        )
+        var threadCalls = 0
+        var authorCalls = 0
+        var mediaCalls = 0
+        composeRule.setContent {
+            TiebaPureTheme {
+                ForumThreadsScreen(
+                    uiState = ForumThreadsUiState(Forum(1, "测试", "测试吧"), threads = listOf(thread), hasMore = false),
+                    callbacks = ForumThreadsCallbacks(
+                        onOpenThread = { threadCalls++ },
+                        onOpenUser = { authorCalls++ },
+                        onOpenMedia = { _, _ -> mediaCalls++ },
+                    ),
+                    onSelectCategory = {}, onTogglePinned = {}, onRefresh = {}, onLoadMore = {},
+                    onToggleForumFollow = {}, onDismissForumActionError = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("整行点击").performScrollTo().performClick()
+        composeRule.onNodeWithTag("forum-thread-12").performTouchInput {
+            click(Offset(width - 2f, height - 2f))
+        }
+        composeRule.onNodeWithContentDescription("评论，当前4条评论", useUnmergedTree = true)
+            .performScrollTo().performTouchInput { click() }
+        composeRule.onNodeWithTag("forum-thread-author-12", useUnmergedTree = true)
+            .performScrollTo().performClick()
+        composeRule.onNodeWithTag("thread-media-preview-0", useUnmergedTree = true)
+            .performScrollTo().performTouchInput { click() }
+        composeRule.runOnIdle {
+            assertEquals(3, threadCalls)
+            assertEquals(1, authorCalls)
+            assertEquals(1, mediaCalls)
+        }
+    }
+
+    @Test
+    fun mostCommentedMenuOffersPublicationDayAndWeek() {
+        var selected: dev.infinityf4p.tiebapure.core.model.FeedWindow? = null
+        composeRule.setContent {
+            TiebaPureTheme {
+                ForumThreadsScreen(ForumThreadsUiState(Forum(1, "测试", "测试吧"), hasMore = false),
+                    ForumThreadsCallbacks(), onSelectCategory = {}, onTogglePinned = {}, onRefresh = {}, onLoadMore = {},
+                    onToggleForumFollow = {}, onDismissForumActionError = {}, onSelectCommentWindow = { selected = it })
+            }
+        }
+        composeRule.onNodeWithText("评论最多").performClick()
+        composeRule.onNodeWithText("近24小时发布").performClick()
+        composeRule.runOnIdle { assertEquals(dev.infinityf4p.tiebapure.core.model.FeedWindow.Day, selected) }
+        composeRule.onNodeWithText("评论最多").performClick()
+        composeRule.onNodeWithText("近7天发布").performClick()
+        composeRule.runOnIdle { assertEquals(dev.infinityf4p.tiebapure.core.model.FeedWindow.Week, selected) }
+    }
 
     @Test
     fun hubSeparatesRecentAndFollowedSections() {
@@ -264,7 +326,7 @@ class ForumScreenTest {
 
         composeRule.onNodeWithText("统计主题").performScrollTo()
         composeRule.onNodeWithContentDescription("评论，当前12条评论", useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("点赞，当前7个赞", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("点赞数，当前7个赞", useUnmergedTree = true).assertIsDisplayed()
     }
 }
 

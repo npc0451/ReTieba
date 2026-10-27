@@ -29,3 +29,9 @@ account.json
 *.p12
 *.p8
 *.key
+
+# Local VM diagnostics and signing material
+hs_err_pid*.log
+replay_pid*.log
+.local-signing/
+*.hprof

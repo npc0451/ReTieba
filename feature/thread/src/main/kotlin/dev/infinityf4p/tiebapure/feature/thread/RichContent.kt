@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
@@ -46,7 +47,7 @@ import dev.infinityf4p.tiebapure.core.model.VoiceContent
 
 private const val EmoticonTagPrefix = "emoticon-"
 
-val LocalReadingPreferences = staticCompositionLocalOf { ReadingPreferences() }
+val LocalReadingPreferences = dev.infinityf4p.tiebapure.core.designsystem.LocalReadingPreferences
 
 internal enum class RichContentTextStyle { Body, Reply, Subpost }
 
@@ -192,14 +193,14 @@ internal fun RichContent(
     }
     val baseStyle = when (textStyle) {
         RichContentTextStyle.Body -> MaterialTheme.typography.bodyLarge
-        RichContentTextStyle.Reply -> MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp, lineHeight = 22.sp)
-        RichContentTextStyle.Subpost -> MaterialTheme.typography.bodyMedium
+        RichContentTextStyle.Reply, RichContentTextStyle.Subpost -> MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp, lineHeight = 22.sp)
     }
     val fontSize = (baseStyle.fontSize.value * readingPreferences.fontSize.scale).sp
     val lineHeight = (
         baseStyle.lineHeight.value * readingPreferences.fontSize.scale * readingPreferences.lineSpacing.multiplier
     ).coerceAtLeast(fontSize.value * 1.1f).sp
 
+    SelectionContainer {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         groups.forEachIndexed { index, group ->
             when (group) {
@@ -286,6 +287,7 @@ internal fun RichContent(
                 is RichContentGroup.Voice -> VoicePlaybackControl(voice = group.voice)
             }
         }
+    }
     }
 }
 

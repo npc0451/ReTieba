@@ -6,6 +6,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,14 +29,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.ArrowDropDown
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material.icons.outlined.ThumbUpOffAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -75,6 +75,7 @@ import dev.infinityf4p.tiebapure.core.model.ContentBlock
 import dev.infinityf4p.tiebapure.core.model.Forum
 import dev.infinityf4p.tiebapure.core.model.ForumInfo
 import dev.infinityf4p.tiebapure.core.model.ReaderMediaLoadingPolicy
+import dev.infinityf4p.tiebapure.core.model.FeedWindow
 import dev.infinityf4p.tiebapure.core.model.ForumThreadCategory
 import dev.infinityf4p.tiebapure.core.model.ThreadSummary
 import dev.infinityf4p.tiebapure.core.model.UserSummary
@@ -87,6 +88,9 @@ data class ForumThreadsCapabilities(
 )
 
 data class ForumThreadsCallbacks(
+    val localSubscribed: Boolean = false,
+    val localSubscriptionUpdating: Boolean = false,
+    val onToggleLocalSubscription: ((Forum) -> Unit)? = null,
     val onBack: () -> Unit = {},
     val onSearch: (Forum) -> Unit = {},
     val onOpenThread: (ThreadSummary) -> Unit = {},
@@ -109,6 +113,7 @@ fun ForumThreadsRoute(
         uiState = uiState,
         callbacks = callbacks,
         onSelectCategory = viewModel::selectCategory,
+        onSelectCommentWindow = viewModel::selectMostCommented,
         onTogglePinned = viewModel::togglePinned,
         onRefresh = {
             viewModel.refresh()
@@ -136,12 +141,15 @@ fun ForumThreadsScreen(
     onLoadMore: () -> Unit,
     onToggleForumFollow: () -> Unit,
     onDismissForumActionError: () -> Unit,
+    onSelectCommentWindow: ((FeedWindow) -> Unit)? = null,
     onToggleForumInfo: () -> Unit = {},
     onRetryForumInfo: () -> Unit = {},
     onRetry: () -> Unit = onRefresh,
     mediaLoadingPolicy: ReaderMediaLoadingPolicy = ReaderMediaLoadingPolicy.Automatic,
     modifier: Modifier = Modifier,
 ) {
+    val visibleThreads = remember(uiState.threads, uiState.showsPinned, uiState.commentWindow, uiState.rankingNowEpochSeconds) { uiState.visibleThreads }
+    val pinnedThreads = remember(uiState.threads, uiState.commentWindow, uiState.rankingNowEpochSeconds) { uiState.pinnedThreads }
     if (uiState.forumActionError != null) {
         AlertDialog(
             onDismissRequest = onDismissForumActionError,
@@ -171,6 +179,13 @@ fun ForumThreadsScreen(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (callbacks.onToggleLocalSubscription != null) {
+                TextButton(
+                    onClick = { callbacks.onToggleLocalSubscription.invoke(uiState.forum) },
+                    enabled = !callbacks.localSubscriptionUpdating,
+                    modifier = Modifier.testTag("forum-local-subscription"),
+                ) { Text(if (callbacks.localSubscribed) "已订阅" else "本地订阅") }
+            } else if (uiState.followAvailability != ForumFollowAvailability.Unsupported) {
             IconButton(
                 onClick = onToggleForumFollow,
                 enabled = uiState.canRequestForumFollow && !uiState.isForumFollowOutcomeUnknown,
@@ -183,6 +198,7 @@ fun ForumThreadsScreen(
                         Icon(Icons.Filled.Star, forumFollowDescription(uiState))
                     else -> Icon(Icons.Outlined.StarBorder, forumFollowDescription(uiState))
                 }
+            }
             }
             if (callbacks.capabilities.canCreateThread) {
                 IconButton(
@@ -237,10 +253,23 @@ fun ForumThreadsScreen(
                 }
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     item(key = "category") {
-                        ReaderSectionBand { ForumCategoryBar(uiState.category, onSelectCategory) }
+                        ReaderSectionBand { ForumCategoryBar(uiState.category, onSelectCategory, uiState.commentWindow, onSelectCommentWindow) }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
-                    if (uiState.pinnedThreads.isNotEmpty()) {
+                    if (uiState.commentWindow != null) {
+                        item(key = "ranking-scope") {
+                            val missing = uiState.threads.count { (it.createdAtEpochSeconds ?: 0) <= 0 }
+                            Text("${if (uiState.commentWindow == FeedWindow.Day) "近24小时" else "近7天"}发布 · 按累计评论数排序，仅比较已加载帖子" +
+                                if (missing > 0) "；排除${missing}条缺少发布时间的帖子" else "",
+                                Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (visibleThreads.isEmpty()) item(key = "ranking-empty") {
+                            Text("当前范围暂无可显示的已加载帖子，可继续加载候选帖子。",
+                                Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    if (pinnedThreads.isNotEmpty()) {
                         item(key = "pinned") {
                             Row(
                                 Modifier
@@ -252,16 +281,16 @@ fun ForumThreadsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text("置顶内容", style = MaterialTheme.typography.labelLarge)
-                                Text(" ${uiState.pinnedThreads.size}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(" ${pinnedThreads.size}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.weight(1f))
                                 Icon(if (uiState.showsPinned) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null)
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
-                    itemsIndexed(uiState.visibleThreads, key = { _, item -> item.id }) { index, thread ->
+                    itemsIndexed(visibleThreads, key = { _, item -> item.id }) { index, thread ->
                         ForumThreadItem(thread, uiState.category, callbacks, mediaLoadingPolicy)
-                        if (index >= uiState.visibleThreads.lastIndex - 4 && uiState.hasMore) {
+                        if (uiState.commentWindow == null && index >= visibleThreads.lastIndex - 4 && uiState.hasMore) {
                             LaunchedEffect(thread.id) { onLoadMore() }
                         }
                     }
@@ -299,7 +328,7 @@ fun ForumThreadsScreen(
                                 when {
                                     uiState.isLoadingMore -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                                     uiState.errorMessage != null -> TextButton(onClick = onRetry) { Text("加载失败，点击重试") }
-                                    uiState.hasMore -> TextButton(onClick = onLoadMore) { Text("加载更多帖子") }
+                                    uiState.hasMore -> TextButton(onClick = onLoadMore) { Text(if (uiState.commentWindow != null) "继续加载候选帖子" else "加载更多帖子") }
                                     else -> Text("没有更多了", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
@@ -455,17 +484,19 @@ private fun forumFollowDescription(uiState: ForumThreadsUiState): String = when 
 private fun ForumCategoryBar(
     category: ForumThreadCategory,
     onSelect: (ForumThreadCategory) -> Unit,
+    commentWindow: FeedWindow?,
+    onSelectCommentWindow: ((FeedWindow) -> Unit)?,
 ) {
     var latestMenu by remember { mutableStateOf(false) }
     Row(
-        modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp),
+        modifier = Modifier.fillMaxWidth().height(48.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box {
             CategoryChip(
                 title = "最新",
-                selected = category != ForumThreadCategory.Featured,
+                selected = commentWindow == null && category != ForumThreadCategory.Featured,
                 trailingDropDown = true,
                 onClick = { latestMenu = true },
             )
@@ -486,6 +517,17 @@ private fun ForumCategoryBar(
             trailingDropDown = false,
             onClick = { onSelect(ForumThreadCategory.Featured) },
         )
+        onSelectCommentWindow?.let { select ->
+            var rankingMenu by remember { mutableStateOf(false) }
+            Box {
+                CategoryChip("评论最多", commentWindow != null, true, { rankingMenu = true })
+                DropdownMenu(rankingMenu, { rankingMenu = false }) {
+                    listOf(FeedWindow.Day to "近24小时发布", FeedWindow.Week to "近7天发布").forEach { (window, label) ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = { rankingMenu = false; select(window) })
+                    }
+                }
+            }
+        }
         Spacer(Modifier.weight(1f))
     }
 }
@@ -517,7 +559,11 @@ private fun ForumThreadItem(
     callbacks: ForumThreadsCallbacks,
     mediaLoadingPolicy: ReaderMediaLoadingPolicy,
 ) {
-    ReaderCard(cornerRadius = 0.dp) {
+    ReaderCard(
+        modifier = Modifier.testTag("forum-thread-${thread.id}"),
+        cornerRadius = 0.dp,
+        onClick = { callbacks.onOpenThread(thread) },
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -571,20 +617,19 @@ private fun ForumThreadItem(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .clickable { callbacks.onOpenThread(thread) },
+                    .heightIn(min = 48.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
                     thread.title.ifBlank { thread.textPreview },
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                    style = dev.infinityf4p.tiebapure.core.designsystem.readerContentStyle(16,22).copy(fontWeight = FontWeight.SemiBold),
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
                 thread.textPreview.takeIf { it.isNotBlank() && it != thread.title }?.let { preview ->
                     Text(
                         preview,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = dev.infinityf4p.tiebapure.core.designsystem.readerContentStyle(14,20),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -602,14 +647,10 @@ private fun ForumThreadItem(
             ReaderInteractionStats(
                 comments = thread.replyCount,
                 likes = thread.likeCount,
-                isLiked = thread.isLiked,
-                commentsIcon = Icons.Outlined.ChatBubbleOutline,
-                likesIcon = Icons.Outlined.ThumbUpOffAlt,
-                likedIcon = Icons.Outlined.ThumbUp,
             )
         }
     }
-    HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+    dev.infinityf4p.tiebapure.core.designsystem.ReaderContentDivider()
 }
 
 @Composable

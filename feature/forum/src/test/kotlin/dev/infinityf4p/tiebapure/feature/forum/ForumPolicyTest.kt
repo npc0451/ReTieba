@@ -1,6 +1,7 @@
 package dev.infinityf4p.tiebapure.feature.forum
 
 import dev.infinityf4p.tiebapure.core.model.Forum
+import dev.infinityf4p.tiebapure.core.model.FeedWindow
 import dev.infinityf4p.tiebapure.core.model.ForumInfo
 import dev.infinityf4p.tiebapure.core.model.ForumMembership
 import dev.infinityf4p.tiebapure.core.model.MutationOutcomeUnknown
@@ -41,6 +42,62 @@ class ForumPolicyTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun commentRankingUsesPublicationWindowAndCumulativeCounts() {
+        val now = 2_000_000L
+        val base = forumPage(forum = Forum(42, "测试", "测试吧"), threadId = 1).threads.single()
+        val dayBoundary = base.copy(id = 2, createdAtEpochSeconds = now - 86_400, replyCount = 10)
+        val weekBoundary = base.copy(id = 3, createdAtEpochSeconds = now - 7 * 86_400, replyCount = 30)
+        val recent = base.copy(id = 4, createdAtEpochSeconds = now, replyCount = 20)
+        val oldButActive = base.copy(id = 5, createdAtEpochSeconds = now - 8 * 86_400,
+            lastReplyAtEpochSeconds = now, replyCount = 999)
+        val missing = base.copy(id = 6, createdAtEpochSeconds = null, replyCount = 999)
+        val future = base.copy(id = 7, createdAtEpochSeconds = now + 1, replyCount = 999)
+        val state = ForumThreadsUiState(Forum(42, "测试", "测试吧"),
+            threads = listOf(dayBoundary, weekBoundary, recent, oldButActive, missing, future),
+            commentWindow = FeedWindow.Day, rankingNowEpochSeconds = now)
+        assertEquals(listOf(4L, 2L), state.visibleThreads.map { it.id })
+        assertEquals(listOf(3L, 4L, 2L), state.copy(commentWindow = FeedWindow.Week).visibleThreads.map { it.id })
+    }
+
+    @Test
+    fun commentRankingHasStableTieBreaksAndKeepsPinnedVisibility() {
+        val base = forumPage(forum = Forum(42, "测试", "测试吧"), threadId = 1).threads.single()
+            .copy(createdAtEpochSeconds = 900, replyCount = 10)
+        val state = ForumThreadsUiState(Forum(42, "测试", "测试吧"),
+            threads = listOf(base.copy(id = 1), base.copy(id = 3), base.copy(id = 2, likeCount = 3),
+                base.copy(id = 4, replyCount = 20, isTop = true)),
+            commentWindow = FeedWindow.Day, rankingNowEpochSeconds = 1_000)
+        assertEquals(listOf(2L, 3L, 1L), state.visibleThreads.map { it.id })
+        assertEquals(listOf(4L), state.pinnedThreads.map { it.id })
+        assertEquals(listOf(4L, 2L, 3L, 1L), state.copy(showsPinned = true).visibleThreads.map { it.id })
+    }
+
+    @Test
+    fun commentWindowChangesReusePublishPagesAndManualPaging() = runTest(dispatcher) {
+        val requests = mutableListOf<Pair<ForumThreadCategory, Int>>()
+        val vm = ForumThreadsViewModel(Forum(42, "测试", "测试吧"),
+            repository = ForumThreadsRepository { forum, page, category ->
+                requests += category to page
+                forumPage(forum = forum, currentPage = page, hasMore = true, threadId = page.toLong())
+            }, nowEpochSeconds = { 2_000_000 })
+        advanceUntilIdle()
+        vm.selectMostCommented(FeedWindow.Week)
+        advanceUntilIdle()
+        vm.selectMostCommented(FeedWindow.Day)
+        advanceUntilIdle()
+        assertEquals(listOf(ForumThreadCategory.ReplyTime to 1, ForumThreadCategory.PublishTime to 1), requests)
+        vm.loadMore()
+        advanceUntilIdle()
+        assertEquals(ForumThreadCategory.PublishTime to 2, requests.last())
+        assertEquals(FeedWindow.Day, vm.uiState.value.commentWindow)
+        vm.selectCategory(ForumThreadCategory.PublishTime)
+        advanceUntilIdle()
+        assertEquals(3, requests.size)
+        assertEquals(null, vm.uiState.value.commentWindow)
+        assertEquals(listOf(1L, 2L), vm.uiState.value.threads.map { it.id })
     }
 
     @Test

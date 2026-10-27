@@ -23,6 +23,7 @@ private const val DEFAULT_REPLYING_ENABLED = false
 private const val DEFAULT_LIKING_ENABLED = false
 
 data class AppSettings(
+    val communityColors: Boolean = true,
     val appearance: AppAppearance = AppAppearance.System,
     val postingEnabled: Boolean = DEFAULT_POSTING_ENABLED,
     val replyingEnabled: Boolean = DEFAULT_REPLYING_ENABLED,
@@ -33,8 +34,26 @@ data class AppSettings(
 )
 
 class AppSettingsStore(private val context: Context) {
+    val subscriptionFeed: Flow<dev.infinityf4p.tiebapure.core.model.SubscriptionFeedPreferences> =
+        context.settingsDataStore.data.map { preferences ->
+            dev.infinityf4p.tiebapure.core.model.SubscriptionFeedPreferences(
+                kind = preferences.enumValue(Keys.feedKind, dev.infinityf4p.tiebapure.core.model.FeedSourceKind.All),
+                sourceKeys = preferences[Keys.feedSources],
+                sort = preferences.enumValue(Keys.feedSort, dev.infinityf4p.tiebapure.core.model.FeedSort.Published),
+                window = preferences.enumValue(Keys.feedWindow, dev.infinityf4p.tiebapure.core.model.FeedWindow.Week),
+            )
+        }
+
+    suspend fun setSubscriptionFeed(value: dev.infinityf4p.tiebapure.core.model.SubscriptionFeedPreferences) = edit {
+        it[Keys.feedKind] = value.kind.name
+        it[Keys.feedSort] = value.sort.name
+        it[Keys.feedWindow] = value.window.name
+        value.sourceKeys?.let { keys -> it[Keys.feedSources] = keys } ?: it.remove(Keys.feedSources)
+    }
+
     val values: Flow<AppSettings> = context.settingsDataStore.data.map { preferences ->
         AppSettings(
+            communityColors = preferences[Keys.communityColors] ?: true,
             appearance = runCatching {
                 AppAppearance.valueOf(preferences[Keys.appearance] ?: AppAppearance.System.name)
             }.getOrDefault(AppAppearance.System),
@@ -55,6 +74,7 @@ class AppSettingsStore(private val context: Context) {
 
     suspend fun update(value: AppSettings) {
         context.settingsDataStore.edit { preferences ->
+            preferences[Keys.communityColors] = value.communityColors
             preferences[Keys.appearance] = value.appearance.name
             preferences[Keys.posting] = value.postingEnabled
             preferences[Keys.replying] = value.replyingEnabled
@@ -70,6 +90,7 @@ class AppSettingsStore(private val context: Context) {
     }
 
     suspend fun setAppearance(value: AppAppearance) = edit { it[Keys.appearance] = value.name }
+    suspend fun setCommunityColors(value: Boolean) = edit { it[Keys.communityColors] = value }
 
     suspend fun setPostingEnabled(value: Boolean) = edit { it[Keys.posting] = value }
 
@@ -94,6 +115,11 @@ class AppSettingsStore(private val context: Context) {
     }
 
     private object Keys {
+        val communityColors = booleanPreferencesKey("community_colors")
+        val feedKind = stringPreferencesKey("feed_kind")
+        val feedSort = stringPreferencesKey("feed_sort")
+        val feedWindow = stringPreferencesKey("feed_window")
+        val feedSources = androidx.datastore.preferences.core.stringSetPreferencesKey("feed_sources")
         val appearance = stringPreferencesKey("appearance")
         val posting = booleanPreferencesKey("posting_enabled")
         val replying = booleanPreferencesKey("replying_enabled")

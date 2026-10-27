@@ -36,6 +36,10 @@ data class UserProfileUiState(
     val nextThreadPage: Int = 1,
     val errorMessage: String? = null,
     val actionError: String? = null,
+    val isLoadingForums: Boolean = false,
+    val nextForumPage: Int = 1,
+    val hasMoreForums: Boolean = true,
+    val forumError: String? = null,
 ) {
     val isBusy: Boolean
         get() = isInitialLoading || isRefreshing || isLoadingMore
@@ -63,6 +67,34 @@ class UserProfileViewModel internal constructor(
 
     fun selectTab(tab: UserProfileTab) {
         _uiState.update { it.copy(selectedTab = tab) }
+        if (tab == UserProfileTab.Forums && _uiState.value.nextForumPage == 1) loadMoreForums()
+    }
+
+    fun loadMoreForums() {
+        val state = _uiState.value
+        val profile = state.profile ?: return
+        if (state.isBusy || state.isLoadingForums || !state.hasMoreForums || profile.followedForumsVisibility == UserContentVisibility.Private) return
+        val page = state.nextForumPage
+        val generation = requestGeneration
+        _uiState.update { it.copy(isLoadingForums = true, forumError = null) }
+        modelScope.launch {
+            try {
+                val result = repository.loadForums(profile.user, page)
+                if (generation != requestGeneration) return@launch
+                _uiState.update { current ->
+                    val previous = current.profile?.followedForums.orEmpty()
+                    val merged = (previous + result.forums).distinctBy { it.id.toString() + ":" + it.name }
+                    current.copy(
+                        profile = current.profile?.copy(followedForums = merged),
+                        isLoadingForums = false, nextForumPage = result.currentPage + 1,
+                        hasMoreForums = result.hasMore && (page == 1 || merged.size > previous.size),
+                    )
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (generation == requestGeneration) _uiState.update { it.copy(isLoadingForums = false, forumError = error.message ?: "无法读取公开关注列表。") }
+            }
+        }
     }
 
     fun refresh() {
@@ -73,6 +105,7 @@ class UserProfileViewModel internal constructor(
                 isInitialLoading = it.profile == null,
                 isRefreshing = it.profile != null,
                 errorMessage = null,
+                isLoadingForums = false, nextForumPage = 1, hasMoreForums = true, forumError = null,
             )
         }
         modelScope.launch {
@@ -95,6 +128,7 @@ class UserProfileViewModel internal constructor(
                     isFollowOutcomeUnknown = false,
                     unknownDeletionThreadIds = emptySet(),
                 )
+                if (_uiState.value.selectedTab == UserProfileTab.Forums) loadMoreForums()
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
                 if (generation != requestGeneration) return@launch

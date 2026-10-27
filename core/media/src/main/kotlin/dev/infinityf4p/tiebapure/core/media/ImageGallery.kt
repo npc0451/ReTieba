@@ -40,6 +40,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -126,9 +127,17 @@ fun ImageGallery(
     val context = LocalContext.current.applicationContext
     val loader = remember(context) { OriginalImageLoader(context) }
     val scope = rememberCoroutineScope()
+    var longPressedImage by remember { mutableStateOf<ImageContent?>(null) }
+    longPressedImage?.let { image ->
+        androidx.compose.material3.AlertDialog(onDismissRequest = { longPressedImage = null },
+            title = { Text("图片") },
+            confirmButton = { TextButton(onClick = { longPressedImage = null; onDownload(image) }) { Text("保存图片") } },
+            dismissButton = { TextButton(onClick = { longPressedImage = null }) { Text("取消") } })
+    }
     val pagerState = rememberPagerState(initialPage = safeInitialPage) { images.size }
     val originalStates = remember(images) { mutableStateMapOf<Int, OriginalImageState>() }
     val originalFiles = remember(images) { mutableStateMapOf<Int, File>() }
+    val originalLeases = remember(images) { mutableMapOf<Int, MediaFileReadLease>() }
     val pageScales = remember(images) { mutableStateMapOf<Int, Float>() }
     val saveStates = remember(images) { mutableStateMapOf<Int, GallerySaveState>() }
     val originalJobs = remember(images) { mutableMapOf<Int, Job>() }
@@ -152,6 +161,7 @@ fun ImageGallery(
         onDispose {
             originalJobs.values.forEach(Job::cancel)
             saveJobs.values.forEach(Job::cancel)
+            originalLeases.values.forEach { it.close() }
         }
     }
 
@@ -209,6 +219,7 @@ fun ImageGallery(
                     modifier = Modifier.fillMaxSize(),
                     onScaleChanged = { pageScales[page] = it },
                     onDismiss = ::requestDismiss,
+                    onLongPress = { longPressedImage = image },
                 )
             }
 
@@ -242,7 +253,7 @@ fun ImageGallery(
                     originalJobs[currentPage] = scope.launch {
                         originalStates[currentPage] = OriginalImageState.Loading(0f)
                         try {
-                            val file = loader.load(originalUrl) { progress ->
+                            val lease = loader.acquire(originalUrl) { progress ->
                                 scope.launch {
                                     if (originalStates[currentPage] is OriginalImageState.Loading) {
                                         originalStates[currentPage] = OriginalImageState.Loading(
@@ -251,7 +262,8 @@ fun ImageGallery(
                                     }
                                 }
                             }
-                            originalFiles[currentPage] = file
+                            originalLeases.put(currentPage, lease)?.close()
+                            originalFiles[currentPage] = lease.file
                             originalStates[currentPage] = OriginalImageState.Ready
                         } catch (error: Throwable) {
                             if (error is CancellationException) throw error
@@ -549,6 +561,7 @@ private fun ZoomableImage(
     modifier: Modifier = Modifier,
     onScaleChanged: (Float) -> Unit,
     onDismiss: () -> Unit,
+    onLongPress: () -> Unit = {},
 ) {
     val context = LocalContext.current.applicationContext
     val loader = remember(context) { OriginalImageLoader(context) }
@@ -556,6 +569,8 @@ private fun ZoomableImage(
     val currentOnScaleChanged by rememberUpdatedState(onScaleChanged)
     val currentOnDismiss by rememberUpdatedState(onDismiss)
     var resolvedModel by remember(pageKey) { mutableStateOf<Any?>(null) }
+    val displayLeases = remember(pageKey) { mutableMapOf<String, MediaFileReadLease>() }
+    DisposableEffect(pageKey) { onDispose { displayLeases.values.forEach { it.close() } } }
     var loadState by remember(pageKey) { mutableStateOf<GalleryImageLoadState>(GalleryImageLoadState.Loading(null)) }
     var retryRequest by remember(pageKey) { mutableIntStateOf(0) }
     var scale by remember(pageKey) { mutableFloatStateOf(1f) }
@@ -591,14 +606,16 @@ private fun ZoomableImage(
         }
         loadState = GalleryImageLoadState.Loading(0f)
         try {
-            val file = loader.load(model) { progress ->
+            val lease = loader.acquire(model) { progress ->
                 scope.launch {
                     if (loadState is GalleryImageLoadState.Loading) {
                         loadState = GalleryImageLoadState.Loading(progress.coerceIn(0f, 1f))
                     }
                 }
             }
-            resolvedModel = file
+            if (displayLeases.containsKey(lease.file.absolutePath)) lease.close()
+            else displayLeases[lease.file.absolutePath] = lease
+            resolvedModel = lease.file
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             loadState = GalleryImageLoadState.Failed
@@ -642,6 +659,7 @@ private fun ZoomableImage(
             )
             .pointerInput(pageKey, viewport) {
                 detectTapGestures(
+                    onLongPress = { onLongPress() },
                     onTap = { currentOnDismiss() },
                     onDoubleTap = { tap ->
                         val targetScale = ImageGalleryGesturePolicy.doubleTapScale(scale)

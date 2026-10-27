@@ -109,6 +109,7 @@ interface ThreadRepository {
     suspend fun subpostPage(
         parentPost: Post,
         page: Int,
+        forumId: Long,
     ): SubpostPage
 
     suspend fun threadPageAround(

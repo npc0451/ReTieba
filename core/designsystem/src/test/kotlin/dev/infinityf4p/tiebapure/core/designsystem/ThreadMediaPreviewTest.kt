@@ -10,6 +10,16 @@ import kotlin.test.assertIs
 
 class ThreadMediaPreviewTest {
     @Test
+    fun singleImageUsesItsAspectRatioWithBoundedPortraitHeight() {
+        val portrait = ContentBlock.Image(ImageContent("https://tiebapic.baidu.com/a.jpg", null, 900, 1200, false))
+        val square = ContentBlock.Image(ImageContent("https://tiebapic.baidu.com/b.jpg", null, 900, 900, false))
+        assertEquals(0.75f, threadMediaPreviewAspectRatio(listOf(portrait)))
+        assertEquals(0.65f, threadMediaPreviewAspectRatio(listOf(ContentBlock.Image(ImageContent("https://tiebapic.baidu.com/t.jpg", null, 1, 9, false)))))
+        assertEquals(1.8f, threadMediaPreviewAspectRatio(listOf(ContentBlock.Image(ImageContent("https://tiebapic.baidu.com/w.jpg", null, 9, 1, false)))))
+        assertEquals(1f, threadMediaPreviewAspectRatio(listOf(square)))
+        assertEquals(3f, threadMediaPreviewAspectRatio(listOf(portrait, square)))
+    }
+    @Test
     fun interactionCountsMatchIosCompactFormatting() {
         assertEquals("0", compactInteractionCount(-1))
         assertEquals("999", compactInteractionCount(999))

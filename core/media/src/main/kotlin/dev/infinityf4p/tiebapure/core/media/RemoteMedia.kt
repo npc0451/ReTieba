@@ -2,6 +2,10 @@ package dev.infinityf4p.tiebapure.core.media
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.BrokenImage
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,6 +47,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.toBitmap
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import dev.infinityf4p.tiebapure.core.model.ImageContent
 import dev.infinityf4p.tiebapure.core.model.VideoContent
 import java.io.File
@@ -55,30 +68,63 @@ fun RemoteImage(
     val safeUrl = url?.takeIf { MediaUrlPolicy.isAllowed(it) || OfflineMediaPolicy.resolve(it) != null }
     val context = LocalContext.current.applicationContext
     val loader = remember { OriginalImageLoader(context) }
+    val scope = rememberCoroutineScope()
+    val wantsColor = dev.infinityf4p.tiebapure.core.designsystem.LocalCommunityColors.current && contentDescription?.endsWith("的头像") == true
     var model by remember(safeUrl) { mutableStateOf<File?>(null) }
+    var fileLease by remember(safeUrl) { mutableStateOf<MediaFileReadLease?>(null) }
+    androidx.compose.runtime.DisposableEffect(safeUrl) { onDispose { fileLease?.close() } }
+    var loading by remember(safeUrl) { mutableStateOf(safeUrl != null) }
     LaunchedEffect(safeUrl) {
-        model = safeUrl?.let { runCatching { loader.load(it) }.getOrNull() }
+        try {
+            fileLease = safeUrl?.let { loader.acquire(it) }
+            model = fileLease?.file
+        }
+        catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (_: Exception) { model = null }
+        finally { loading = false }
     }
     Box(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
         if (model == null) {
-            Text(
+            if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 1.5.dp)
+            else if (contentDescription?.endsWith("的头像") == true) Text(
                 text = contentDescription?.firstOrNull()?.uppercase() ?: "?",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelLarge,
-            )
+            ) else Icon(Icons.Outlined.BrokenImage, "图片暂时无法显示", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
+            val imageModel = remember(model, wantsColor) {
+                if (wantsColor) ImageRequest.Builder(context).data(model).size(64, 64).allowHardware(false).build() else model
+            }
             AsyncImage(
-                model = model,
+                model = imageModel,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = contentScale,
+                onSuccess = { success ->
+                    if (safeUrl != null && wantsColor && safeUrl !in avatarColors) scope.launch {
+                        val color = withContext(Dispatchers.Default) {
+                            runCatching {
+                                val bitmap = success.result.image.toBitmap(32, 32, android.graphics.Bitmap.Config.ARGB_8888)
+                                val pixels = IntArray(1024)
+                                bitmap.getPixels(pixels, 0, 32, 0, 0, 32, 32)
+                                dominantAvatarColor(pixels)
+                            }.getOrNull()
+                        }
+                        if (color != null) {
+                            if (avatarColors.size >= 128) avatarColors.keys.firstOrNull()?.let(avatarColors::remove)
+                            avatarColors[safeUrl] = color
+                        }
+                    }
+                },
             )
         }
     }
 }
+
+val LocalImageSaveRequest = staticCompositionLocalOf<((ImageContent) -> Unit)?> { null }
 
 @Composable
 fun AvatarImage(
@@ -99,6 +145,13 @@ fun MediaGrid(
     onImageClick: (index: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val saveImage = LocalImageSaveRequest.current
+    var pendingSave by remember { mutableStateOf<ImageContent?>(null) }
+    pendingSave?.let { image ->
+        AlertDialog(onDismissRequest = { pendingSave = null }, title = { Text("图片") },
+            confirmButton = { TextButton(onClick = { pendingSave = null; saveImage?.invoke(image) }) { Text("保存图片") } },
+            dismissButton = { TextButton(onClick = { pendingSave = null }) { Text("取消") } })
+    }
     if (images.isEmpty()) return
 
     if (images.size == 1) {
@@ -111,7 +164,7 @@ fun MediaGrid(
                 .fillMaxWidth(if (image.aspectRatio >= 1.25) 1f else 0.72f)
                 .aspectRatio(image.aspectRatio.toFloat().coerceIn(0.65f, 1.8f))
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { onImageClick(0) },
+                .combinedClickable(onClick = { onImageClick(0) }, onLongClick = if (saveImage == null) null else ({ pendingSave = image })),
         )
         return
     }
@@ -132,7 +185,7 @@ fun MediaGrid(
                             .weight(1f)
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { onImageClick(index) },
+                            .combinedClickable(onClick = { onImageClick(index) }, onLongClick = if (saveImage == null) null else ({ pendingSave = image })),
                     )
                 }
                 repeat(columns - rowImages.size) { Spacer(Modifier.weight(1f)) }
@@ -146,18 +199,21 @@ fun mediaGridColumnCount(imageCount: Int): Int = when (imageCount) {
     else -> 3
 }
 
+val LocalMediaFileSaveRequest = staticCompositionLocalOf<((dev.infinityf4p.tiebapure.core.model.ContentBlock) -> Unit)?> { null }
+
 @Composable
 fun VideoPreview(
     video: VideoContent,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val saveFile = LocalMediaFileSaveRequest.current
     Box(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(video.aspectRatio.toFloat().coerceIn(0.7f, 1.8f))
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = saveFile?.let { save -> { save(dev.infinityf4p.tiebapure.core.model.ContentBlock.Video(video)) } })
             .semantics { contentDescription = "播放视频" },
         contentAlignment = Alignment.Center,
     ) {

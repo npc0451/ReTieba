@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.FileDownload
@@ -46,9 +48,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -122,7 +128,7 @@ fun SavedThreadsRoute(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("本地保存的帖子") },
+                title = { Text("离线保存的帖子") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
@@ -133,7 +139,7 @@ fun SavedThreadsRoute(
                         CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
                     } else {
                         IconButton(onClick = { menuExpanded = true }) {
-                            Icon(Icons.Outlined.MoreVert, contentDescription = "本地保存操作")
+                            Icon(Icons.Outlined.MoreVert, contentDescription = "离线保存操作")
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                             DropdownMenuItem(
@@ -182,7 +188,7 @@ fun SavedThreadsRoute(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text("清空本地保存") },
+                                text = { Text("清空离线保存") },
                                 leadingIcon = { Icon(Icons.Outlined.DeleteSweep, null) },
                                 enabled = entries.isNotEmpty(),
                                 onClick = { menuExpanded = false; confirmsClear = true },
@@ -205,7 +211,7 @@ fun SavedThreadsRoute(
                 placeholder = { Text("搜索标题、作者或贴吧") },
             )
             when {
-                entries.isEmpty() -> SavedThreadsEmpty("还没有本地保存", "请在帖子页右上角点击保存图标。")
+                entries.isEmpty() -> SavedThreadsEmpty("还没有离线保存", "请在帖子页右上角点击保存图标。")
                 visible.isEmpty() -> SavedThreadsEmpty("没有匹配的帖子", "换个标题、作者或贴吧名称搜索。")
                 else -> LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
                     items(visible, key = SavedThreadListItem::threadId) { entry ->
@@ -251,7 +257,7 @@ fun SavedThreadsRoute(
                             }
                             Spacer(Modifier.width(8.dp))
                             IconButton(onClick = { pendingDelete = entry }) {
-                                Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除本地保存")
+                                Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除离线保存")
                             }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -287,7 +293,7 @@ fun SavedThreadsRoute(
     pendingDelete?.let { entry ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("删除本地保存？") },
+            title = { Text("删除离线保存？") },
             text = { Text("删除后需要重新联网保存才能恢复。") },
             confirmButton = {
                 TextButton(onClick = {
@@ -307,7 +313,7 @@ fun SavedThreadsRoute(
         AlertDialog(
             onDismissRequest = { pendingImportUri = null },
             title = { Text("导入本地帖子备份") },
-            text = { Text("合并会保留本机较新的同名帖子；替换会先清空现有本地帖子。登录状态和设置不会导入。") },
+            text = { Text("合并会保留本机较新的同名帖子；替换会先清空现有本地帖子。阅读设置不会导入。") },
             confirmButton = {
                 TextButton(onClick = {
                     pendingImportUri = null
@@ -349,7 +355,7 @@ fun SavedThreadsRoute(
                     confirmsClear = false
                     scope.launch {
                         runCatching { repository.clearAll() }
-                            .onSuccess { statusMessage = "已清空本地保存。" }
+                            .onSuccess { statusMessage = "已清空离线保存。" }
                             .onFailure { errorMessage = it.message ?: "清空失败。" }
                     }
                 }) { Text("清空", color = MaterialTheme.colorScheme.error) }
@@ -383,7 +389,7 @@ fun SavedThreadSaveModeDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("保存到本机") },
+        title = { Text("离线保存") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SavedThreadSaveModeRow(
@@ -436,8 +442,8 @@ fun SavedThreadDetailRoute(
     var errorMessage by remember(threadId) { mutableStateOf<String?>(null) }
     LaunchedEffect(threadId) {
         runCatching { repository.load(threadId) }
-            .onSuccess { snapshot = it ?: run { errorMessage = "本地保存不存在或已被删除。"; null } }
-            .onFailure { errorMessage = it.message ?: "无法读取本地保存。" }
+            .onSuccess { snapshot = it ?: run { errorMessage = "离线保存不存在或已被删除。"; null } }
+            .onFailure { errorMessage = it.message ?: "无法读取离线保存。" }
     }
 
     when {
@@ -469,7 +475,7 @@ private fun SavedThreadLoadError(message: String, onBack: () -> Unit, modifier: 
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("本地保存") },
+                title = { Text("离线保存") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
@@ -479,13 +485,13 @@ private fun SavedThreadLoadError(message: String, onBack: () -> Unit, modifier: 
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            SavedThreadsEmpty("无法打开本地保存", message)
+            SavedThreadsEmpty("无法打开离线保存", message)
         }
     }
 }
 
 @Composable
-private fun SavedThreadDetailScreen(
+internal fun SavedThreadDetailScreen(
     snapshot: SavedThreadSnapshot,
     readingPreferences: ReadingPreferences,
     onBack: () -> Unit,
@@ -497,6 +503,7 @@ private fun SavedThreadDetailScreen(
     onSaveImage: ImageSaveAction?,
     modifier: Modifier,
 ) {
+    var showsSavedInfo by rememberSaveable(snapshot.thread.id) { mutableStateOf(true) }
     var selectedPostId by remember(snapshot.thread.id) { mutableStateOf<ULong?>(null) }
     val selectedPost = snapshot.posts.firstOrNull { it.post.id == selectedPostId }
     val main = checkNotNull(snapshot.mainPost).displayPost
@@ -528,25 +535,34 @@ private fun SavedThreadDetailScreen(
 
     CompositionLocalProvider(LocalReadingPreferences provides readingPreferences) {
         Column(modifier) {
-            Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                Text(
-                    buildString {
-                        append("保存于 ")
-                        append(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(snapshot.savedAtMilliseconds)))
-                        append(" · ${savedThreadMediaModeLabel(snapshot.mediaMode)}")
-                        if (snapshot.newReplyCount > 0) append(" · 新增 ${snapshot.newReplyCount} 条回复")
-                        if (snapshot.isPartial) {
-                            append(" · 部分保存")
-                            savedThreadIncompleteContent(snapshot)?.let { append("\n$it") }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            if (showsSavedInfo) Surface(
+                onClick = { showsSavedInfo = false },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("saved-thread-info")
+                    .semantics { onClick(label = "收起保存信息", action = null) },
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+            ) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        buildString {
+                            append("保存于 ")
+                            append(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(snapshot.savedAtMilliseconds)))
+                            append(" · ${savedThreadMediaModeLabel(snapshot.mediaMode)}")
+                            if (snapshot.newReplyCount > 0) append(" · 新增 ${snapshot.newReplyCount} 条回复")
+                            if (snapshot.isPartial) {
+                                append(" · 部分保存")
+                                savedThreadIncompleteContent(snapshot)?.let { append("\n$it") }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Icon(Icons.Outlined.ExpandLess, null, Modifier.padding(start = 8.dp).size(20.dp))
+                }
             }
             ThreadScreen(
                 state = state,
+                onShowSavedInfo = { showsSavedInfo = true },
                 capabilities = ThreadCapabilities(
                     canReply = false,
                     canLike = false,

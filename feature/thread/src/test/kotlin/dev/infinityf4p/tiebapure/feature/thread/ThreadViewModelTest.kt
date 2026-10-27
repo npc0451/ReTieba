@@ -32,6 +32,7 @@ import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -79,7 +80,7 @@ class ThreadViewModelTest {
     }
 
     @Test
-    fun failedFilterReloadClearsPreviousRepliesAndRetriesSelectedFilter() = runTest(dispatcher) {
+    fun failedFilterReloadKeepsPreviousRepliesAndRetriesSelectedFilter() = runTest(dispatcher) {
         val repository = ControllableThreadRepository()
         val viewModel = ThreadViewModel(42, repository)
         runCurrent()
@@ -90,21 +91,24 @@ class ThreadViewModelTest {
         viewModel.selectSort(ThreadReplySort.Descending)
 
         assertEquals(ThreadReplySort.Descending, viewModel.state.value.sort)
-        assertNull(viewModel.state.value.page)
-        assertTrue(viewModel.state.value.posts.isEmpty())
-        assertTrue(viewModel.state.value.isInitialLoading)
+        assertNotNull(viewModel.state.value.page)
+        assertEquals(listOf(2uL), viewModel.state.value.posts.map(Post::id))
+        assertFalse(viewModel.state.value.isInitialLoading)
+        assertTrue(viewModel.state.value.isChangingReplies)
         runCurrent()
         repository.threadCalls.last().result.completeExceptionally(IllegalStateException("筛选加载失败"))
         advanceUntilIdle()
 
-        assertNull(viewModel.state.value.page)
-        assertTrue(viewModel.state.value.posts.isEmpty())
+        assertNotNull(viewModel.state.value.page)
+        assertEquals(listOf(2uL), viewModel.state.value.posts.map(Post::id))
+        assertTrue(viewModel.state.value.hasPendingReplyFilters)
+        assertEquals(ThreadReplySort.Hot, viewModel.state.value.appliedSort)
         assertFalse(viewModel.state.value.isInitialLoading)
         assertEquals("筛选加载失败", viewModel.state.value.errorMessage)
 
         viewModel.refresh()
 
-        assertTrue(viewModel.state.value.isInitialLoading)
+        assertTrue(viewModel.state.value.isChangingReplies)
         assertFalse(viewModel.state.value.isRefreshing)
         assertNull(viewModel.state.value.errorMessage)
         runCurrent()
@@ -114,6 +118,8 @@ class ThreadViewModelTest {
         advanceUntilIdle()
 
         assertEquals(listOf(90uL), viewModel.state.value.posts.map(Post::id))
+        assertFalse(viewModel.state.value.hasPendingReplyFilters)
+        assertEquals(1L, viewModel.state.value.replyChangeVersion)
         assertFalse(viewModel.state.value.isInitialLoading)
         assertNull(viewModel.state.value.errorMessage)
     }
@@ -147,6 +153,29 @@ class ThreadViewModelTest {
         assertTrue(viewModel.state.value.onlyThreadAuthor)
         assertEquals(listOf(30uL), viewModel.state.value.posts.map(Post::id))
         assertFalse(viewModel.state.value.isInitialLoading)
+    }
+
+    @Test
+    fun authorFilterKeepsLoadedContentAndBlocksPaginationUntilCommitted() = runTest(dispatcher) {
+        val repository = ControllableThreadRepository()
+        val viewModel = ThreadViewModel(42, repository)
+        runCurrent()
+        repository.threadCalls.single().result.complete(controllableThreadPage(replyId = 2u))
+        advanceUntilIdle()
+        viewModel.setOnlyThreadAuthor(true)
+        runCurrent()
+        assertEquals(listOf(2uL), viewModel.state.value.posts.map(Post::id))
+        assertTrue(viewModel.state.value.isChangingReplies)
+        val count = repository.threadCalls.size
+        viewModel.loadMore()
+        runCurrent()
+        assertEquals(count, repository.threadCalls.size)
+        repository.threadCalls.last().result.complete(controllableThreadPage(replyId = 3u))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.appliedOnlyThreadAuthor)
+        assertFalse(viewModel.state.value.isChangingReplies)
+        assertFalse(viewModel.state.value.hasPendingReplyFilters)
+        assertEquals(listOf(3uL), viewModel.state.value.posts.map(Post::id))
     }
 
     @Test
@@ -655,6 +684,60 @@ class ThreadViewModelTest {
         advanceUntilIdle()
         assertEquals(1, repository.savedPositions.size)
     }
+    @Test
+    fun laterKnownFloorEnrichesSamePostWithoutGuessingOrLosingKnownContent() {
+        val known = controllableThreadPage(2u).posts.last().copy(floor = 0)
+        val fresh = known.copy(floor = 7, blocks = emptyList(), author = UserSummary(0, "", "", ""))
+        val merged = mergePosts(listOf(known), listOf(fresh), null).single()
+        assertEquals(7, merged.floor)
+        assertEquals(known.blocks, merged.blocks)
+        assertEquals(known.author, merged.author)
+        val other = known.copy(author = known.author.copy(id = 99, name = "other", displayName = "", portrait = "", level = null))
+        assertEquals(other.author, mergeKnownPost(known.copy(author = known.author.copy(level = 13)), other).author)
+        assertEquals(7, mergeKnownPost(merged, fresh.copy(floor = 0)).floor)
+        assertEquals(0, mergePosts(emptyList(), listOf(known), null).single().floor)
+        assertEquals("该楼的回复", floorReplyTitle(0, null))
+        assertEquals("该楼 · 2条回复", floorReplyTitle(0, 2))
+        val child = controllableSubpostPage(known, 21u).subposts.single().copy(floor = 0)
+        val enrichedChild = mergeSubposts(listOf(child), listOf(child.copy(floor = 6))).single()
+        assertEquals(6, enrichedChild.floor)
+        assertEquals(6, mergeSubposts(listOf(enrichedChild), listOf(child)).single().floor)
+        assertEquals("7楼 · 2条回复", floorReplyTitle(7, 2))
+    }
+
+    @Test
+    fun subpostResponseUpdatesParentFloorInSheetAndThread() = runTest(dispatcher) {
+        val repository = ControllableThreadRepository()
+        val vm = ThreadViewModel(42, repository)
+        runCurrent()
+        val page = controllableThreadPage(2u).let { it.copy(posts = it.posts.map { p -> if (p.id == 2uL) p.copy(floor = 0) else p }) }
+        repository.threadCalls.single().result.complete(page)
+        advanceUntilIdle()
+        val unknown = vm.state.value.posts.single()
+        vm.openSubposts(unknown); runCurrent()
+        repository.subpostCalls.single().result.complete(controllableSubpostPage(unknown.copy(floor = 8, blocks = emptyList(), likeCount = 0, author = UserSummary(0, "", "", "")), 21u))
+        advanceUntilIdle()
+        assertEquals(8, vm.state.value.subposts!!.parent.floor)
+        assertEquals(8, vm.state.value.posts.single().floor)
+        assertEquals(unknown.blocks, vm.state.value.posts.single().blocks)
+        assertEquals(unknown.author, vm.state.value.posts.single().author)
+        assertEquals(8, vm.state.value.page!!.posts.first { it.id == unknown.id }.floor)
+    }
+
+    @Test
+    fun unrelatedSubpostParentCannotOverwriteCurrentFloor() = runTest(dispatcher) {
+        val repository = ControllableThreadRepository()
+        val vm = ThreadViewModel(42, repository); runCurrent()
+        repository.threadCalls.single().result.complete(controllableThreadPage(2u)); advanceUntilIdle()
+        val parent = vm.state.value.posts.single()
+        vm.openSubposts(parent); runCurrent()
+        repository.subpostCalls.single().result.complete(controllableSubpostPage(parent.copy(id = 999u, floor = 99), 21u))
+        advanceUntilIdle()
+        assertEquals(parent.floor, vm.state.value.subposts!!.parent.floor)
+        assertTrue(vm.state.value.subposts!!.items.isEmpty())
+        assertNotNull(vm.state.value.subposts!!.errorMessage)
+    }
+
 }
 
 private class ControllableThreadRepository : ThreadRepository {
@@ -687,7 +770,7 @@ private class ControllableThreadRepository : ThreadRepository {
         return call.result.awaitIgnoringCancellation(call.cancelled)
     }
 
-    override suspend fun subpostPage(parentPost: Post, page: Int): SubpostPage {
+    override suspend fun subpostPage(parentPost: Post, page: Int, forumId: Long): SubpostPage {
         val call = SubpostCall(parentPost, page)
         subpostCalls += call
         return call.result.awaitIgnoringCancellation(call.cancelled)
@@ -818,7 +901,7 @@ private class FixtureThreadRepository : ThreadRepository {
         ).also { if (missingMainResponses > 0) missingMainResponses -= 1 }
     }
 
-    override suspend fun subpostPage(parentPost: Post, page: Int): SubpostPage = SubpostPage(
+    override suspend fun subpostPage(parentPost: Post, page: Int, forumId: Long): SubpostPage = SubpostPage(
         parentPost = parentPost,
         subposts = if (page == 1) {
             listOf(subpost(21u), subpost(22u))

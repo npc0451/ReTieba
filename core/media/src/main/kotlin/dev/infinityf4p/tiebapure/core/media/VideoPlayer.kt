@@ -123,7 +123,7 @@ class SecureVideoDownloadClient internal constructor(
     client: OkHttpClient,
     maximumBytes: Long,
 ) {
-    constructor(context: Context) : this(context, OkHttpClient(), MAXIMUM_VIDEO_BYTES)
+    constructor(context: Context) : this(context, defaultMediaHttpClient, MAXIMUM_VIDEO_BYTES)
 
     private val directory = File(context.cacheDir, "video-playback")
     private val downloader = SecureMediaDownloader(
@@ -132,10 +132,6 @@ class SecureVideoDownloadClient internal constructor(
         maximumBytes = maximumBytes,
         kind = RemoteMediaKind.Video,
     )
-
-    init {
-        removeStalePlaybackFiles(directory)
-    }
 
     suspend fun download(url: String, onProgress: (Float) -> Unit = {}): VideoFileLease {
         OfflineMediaPolicy.resolve(url)?.let { local ->
@@ -548,13 +544,6 @@ private fun LocalVideoPlayer(
     }
 }
 
-private fun removeStalePlaybackFiles(directory: File) {
-    if (!directory.isDirectory && !directory.mkdirs()) return
-    val cutoff = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(24)
-    directory.listFiles().orEmpty()
-        .filter { it.isFile && it.lastModified() < cutoff }
-        .forEach(File::delete)
-}
 
 internal class OrderedVideoSessionOwner<Player : Any, Lease : Any>(
     private val disposePlayer: (Player) -> Unit,

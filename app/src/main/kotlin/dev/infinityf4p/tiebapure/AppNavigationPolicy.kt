@@ -51,7 +51,7 @@ internal fun isComposerDestinationRoute(route: String?): Boolean =
     route?.startsWith("compose/") == true
 
 internal fun shouldShowCompactRootNavigation(route: String?): Boolean =
-    route?.startsWith("thread/") != true && !isComposerDestinationRoute(route)
+    route?.startsWith("thread/") != true && route?.startsWith("search") != true && !isComposerDestinationRoute(route)
 
 internal fun shouldRequestHomeRefresh(
     selectedRootRoute: String,

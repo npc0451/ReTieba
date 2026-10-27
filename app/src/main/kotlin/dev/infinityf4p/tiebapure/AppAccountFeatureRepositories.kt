@@ -346,7 +346,7 @@ internal suspend fun aggregateFollowingUserThreads(
     )
 }
 
-private fun BrowsingHistoryEntity.toBrowsingHistoryEntry(): BrowsingHistoryEntry = BrowsingHistoryEntry(
+internal fun BrowsingHistoryEntity.toBrowsingHistoryEntry(): BrowsingHistoryEntry = BrowsingHistoryEntry(
     thread = ThreadSummary(
         id = threadId,
         title = title,

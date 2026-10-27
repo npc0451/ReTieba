@@ -22,17 +22,23 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.ThumbUpOffAlt
-import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,7 +64,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.infinityf4p.tiebapure.core.designsystem.LocalTiebaPureDimensions
 import dev.infinityf4p.tiebapure.core.designsystem.ReaderCard
 import dev.infinityf4p.tiebapure.core.designsystem.ReaderInteractionStats
 import dev.infinityf4p.tiebapure.core.designsystem.ThreadMediaPreview
@@ -110,6 +115,12 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val topState = rememberTopAppBarState()
+    val topBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(topState,
+        canScroll = { uiState.threads.isNotEmpty() && !uiState.isInitialLoading && !uiState.isRefreshing })
+    LaunchedEffect(uiState.isRefreshing, uiState.threads.isEmpty()) {
+        if (uiState.isRefreshing || uiState.threads.isEmpty()) topState.heightOffset = 0f
+    }
     val pullToRefreshState = rememberPullToRefreshState()
     val retainedRefreshOffset = remember { Animatable(0f) }
     var handledRefreshRequest by remember { mutableLongStateOf(programmaticRefreshRequest) }
@@ -157,19 +168,18 @@ fun HomeScreen(
         listState.requestScrollToItem(0)
     }
     val refreshContentOffset = maxOf(gestureRefreshOffset, retainedRefreshOffset.value)
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-    ) {
-        HomeTopBar(onSearch = callbacks.onOpenSearch)
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Scaffold(
+        modifier = modifier.fillMaxSize().nestedScroll(topBehavior.nestedScrollConnection),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = { HomeTopBar(callbacks.onOpenSearch, topBehavior) },
+    ) { topPadding ->
         PullToRefreshBox(
             isRefreshing = uiState.isRefreshing,
             onRefresh = onRefresh,
             state = pullToRefreshState,
             modifier = Modifier
                 .fillMaxSize()
+                .padding(topPadding)
                 .testTag("home-feed"),
         ) {
             Box(
@@ -216,8 +226,8 @@ fun HomeScreen(
                             .fillMaxSize()
                             .testTag("home-feed-list"),
                         state = listState,
-                        contentPadding = PaddingValues(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(0.dp),
                     ) {
                         itemsIndexed(
                             items = uiState.threads,
@@ -226,12 +236,9 @@ fun HomeScreen(
                             HomeThreadRow(
                                 thread = thread,
                                 callbacks = callbacks,
-                                isLikeUpdating = thread.id in uiState.updatingLikeThreadIds,
-                                isLikeOutcomeUnknown = thread.id in uiState.unknownLikeThreadIds,
                                 mediaLoadingPolicy = mediaLoadingPolicy,
                                 modifier = Modifier
-                                    .animateItem()
-                                    .padding(horizontal = 8.dp),
+                                    .animateItem(),
                             )
                             if (index >= uiState.threads.lastIndex - 4 && uiState.hasMore) {
                                 LaunchedEffect(thread.id) { onLoadMore() }
@@ -253,68 +260,53 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeTopBar(onSearch: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .padding(start = 16.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("首页", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.weight(1f))
-        IconButton(onClick = onSearch, modifier = Modifier.testTag("home-search")) {
-            Icon(Icons.Outlined.Search, contentDescription = "搜索")
+private fun HomeTopBar(onSearch: () -> Unit, scrollBehavior: TopAppBarScrollBehavior) {
+    TopAppBar(modifier = Modifier.testTag("home-top-bar"), title = {
+        Surface(onClick = onSearch, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("home-search"),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f))) {
+            Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Outlined.Search, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                Text("搜索贴吧、帖子", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-    }
+    }, expandedHeight = 56.dp, windowInsets = WindowInsets(0,0,0,0), scrollBehavior = scrollBehavior,
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface,
+            scrolledContainerColor = MaterialTheme.colorScheme.surface))
 }
 
 @Composable
-private fun HomeThreadRow(
+fun HomeThreadRow(
     thread: ThreadSummary,
     callbacks: HomeCallbacks,
-    isLikeUpdating: Boolean,
-    isLikeOutcomeUnknown: Boolean,
     mediaLoadingPolicy: ReaderMediaLoadingPolicy,
     modifier: Modifier = Modifier,
 ) {
-    val dimensions = LocalTiebaPureDimensions.current
     val forum = thread.forumRoute()
-    val onLikesClick = if (callbacks.canLike && thread.firstPostId != null) {
-        callbacks.onToggleLike?.let { toggle -> { toggle(thread) } }
-    } else {
-        null
-    }
-    ReaderCard(modifier = modifier) {
+    ReaderCard(modifier = modifier, cornerRadius = 0.dp, onClick = { callbacks.onOpenThread(thread) }, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(dimensions.spacingSm),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ThreadIdentityHeader(
-                    thread = thread,
-                    forum = forum,
-                    onOpenForum = callbacks.onOpenForum,
-                    onOpenUser = callbacks.onOpenUser,
-                    modifier = Modifier.weight(1f),
-                )
-                ThreadMenu(thread = thread, forum = forum, onBlockForum = callbacks.onBlockForum)
-            }
+            dev.infinityf4p.tiebapure.core.designsystem.ReaderCommunityRow(
+                name = forum?.displayName ?: thread.author.resolvedDisplayName,
+                time = compactThreadTime(thread.createdAtEpochSeconds),
+                onOpen = { if (forum != null) callbacks.onOpenForum(forum) else callbacks.onOpenUser(thread.author) },
+                avatar = { AvatarImage(dev.infinityf4p.tiebapure.core.designsystem.threadIdentityAvatarUrl(thread), forum?.displayName ?: thread.author.resolvedDisplayName, Modifier.size(24.dp)) },
+                subscribed = forum?.let(callbacks.isSubscribed) == true,
+                onSubscribe = forum?.let { f -> callbacks.onSubscribe?.let { action -> { action(f) } } },
+                more = { ThreadMenu(thread, forum, callbacks.onBlockForum, callbacks.onOpenUser) },
+            )
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .clickable { callbacks.onOpenThread(thread) },
-                verticalArrangement = Arrangement.spacedBy(dimensions.spacingXs),
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (thread.title.isNotBlank()) {
                     Text(
                         thread.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        style = dev.infinityf4p.tiebapure.core.designsystem.readerContentStyle(16, 22).copy(fontWeight = FontWeight.SemiBold),
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -322,7 +314,7 @@ private fun HomeThreadRow(
                 thread.textPreview.takeIf(String::isNotBlank)?.let { preview ->
                     Text(
                         preview,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = dev.infinityf4p.tiebapure.core.designsystem.readerContentStyle(14, 20),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -337,92 +329,20 @@ private fun HomeThreadRow(
             ) { url, description, modifier ->
                 RemoteImage(url = url, contentDescription = description, modifier = modifier)
             }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             ReaderInteractionStats(
                 comments = thread.replyCount,
                 likes = thread.likeCount,
-                isLiked = thread.isLiked,
-                isLikeUpdating = isLikeUpdating || isLikeOutcomeUnknown,
                 onCommentsClick = { callbacks.onOpenComments(thread) },
-                onLikesClick = onLikesClick,
-                commentsIcon = Icons.Outlined.ChatBubbleOutline,
-                likesIcon = Icons.Outlined.ThumbUpOffAlt,
-                likedIcon = Icons.Outlined.ThumbUp,
-                modifier = Modifier
-                    .testTag("home-like-${thread.id}")
-                    .then(
-                        if (isLikeOutcomeUnknown) {
-                            Modifier.semantics {
-                                stateDescription = "点赞结果待确认"
-                            }
-                        } else {
-                            Modifier
-                        },
-                    ),
+                modifier = Modifier.weight(1f).testTag("home-like-${thread.id}"),
             )
-        }
-    }
-}
-
-@Composable
-private fun ThreadIdentityHeader(
-    thread: ThreadSummary,
-    forum: Forum?,
-    onOpenForum: (Forum) -> Unit,
-    onOpenUser: (UserSummary) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val dimensions = LocalTiebaPureDimensions.current
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clickable(enabled = forum != null || thread.author.id > 0L) {
-                    if (forum != null) onOpenForum(forum) else onOpenUser(thread.author)
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            AvatarImage(
-                url = forum?.avatarUrl ?: thread.author.portrait,
-                name = forum?.displayName ?: thread.author.resolvedDisplayName,
-                modifier = Modifier.size(32.dp),
-            )
-        }
-        Column(Modifier.padding(start = dimensions.spacingSm)) {
-            Text(
-                text = forum?.displayName ?: thread.author.resolvedDisplayName,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable(enabled = forum != null || thread.author.id > 0L) {
-                    if (forum != null) onOpenForum(forum) else onOpenUser(thread.author)
-                },
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (forum != null) {
-                    Text(
-                        text = thread.author.resolvedDisplayName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable(enabled = thread.author.id > 0L) { onOpenUser(thread.author) },
-                    )
-                }
-                compactThreadTime(thread.lastReplyAtEpochSeconds)?.let { time ->
-                    Text(
-                        text = if (forum == null) time else " · $time",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
+            callbacks.onShare?.let { share -> dev.infinityf4p.tiebapure.core.designsystem.ReaderShareAction { share(thread) } }
             }
         }
     }
+    dev.infinityf4p.tiebapure.core.designsystem.ReaderContentDivider()
 }
+
 
 @Composable
 private fun ThreadBadges(thread: ThreadSummary) {
@@ -449,13 +369,16 @@ private fun ThreadMenu(
     @Suppress("UNUSED_PARAMETER") thread: ThreadSummary,
     forum: Forum?,
     onBlockForum: (Forum) -> Unit,
+    onOpenUser: (UserSummary) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }) {
-            Icon(Icons.Outlined.MoreHoriz, contentDescription = "更多操作")
+            Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作", modifier = Modifier.size(20.dp))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("查看作者：${thread.author.resolvedDisplayName}") }, enabled = thread.author.id > 0,
+                onClick = { expanded = false; onOpenUser(thread.author) })
             if (forum != null) {
                 DropdownMenuItem(
                     text = { Text("屏蔽${forum.displayName}") },

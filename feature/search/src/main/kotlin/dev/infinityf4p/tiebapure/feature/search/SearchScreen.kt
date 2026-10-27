@@ -2,10 +2,14 @@ package dev.infinityf4p.tiebapure.feature.search
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,15 +22,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowDropDown
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material.icons.outlined.ThumbUpOffAlt
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -46,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -125,6 +129,10 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
 ) {
     val focusRequester = remember { FocusRequester() }
+    var hasFocused by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!hasFocused) { focusRequester.requestFocus(); hasFocused = true }
+    }
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
@@ -135,16 +143,16 @@ fun SearchScreen(
                 value = uiState.input,
                 onValueChange = onInputChanged,
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
-                placeholder = { Text(uiState.scope.prompt, style = MaterialTheme.typography.bodySmall) },
+                textStyle = MaterialTheme.typography.bodyLarge,
+                placeholder = { Text(uiState.scope.prompt, style = MaterialTheme.typography.bodyMedium) },
                 leadingIcon = { Icon(Icons.Outlined.Search, null) },
                 trailingIcon = if (uiState.input.isNotEmpty()) {
                     { IconButton(onClearQuery) { Icon(Icons.Outlined.Close, "清空搜索") } }
                 } else null,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.weight(1f).height(48.dp).focusRequester(focusRequester).testTag("search-input"),
+                shape = RoundedCornerShape(50),
+                modifier = Modifier.weight(1f).heightIn(min = 56.dp).focusRequester(focusRequester).testTag("search-input"),
             )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -175,8 +183,7 @@ private fun SearchHistory(
     LazyColumn(Modifier.fillMaxSize().testTag("search-history")) {
         item {
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.History, null, Modifier.size(20.dp))
-                Text("搜索历史", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 8.dp))
+                Text("最近搜索", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 8.dp))
                 Spacer(Modifier.weight(1f))
                 if (history.isNotEmpty()) TextButton(onClick = onClear) { Text("清空") }
             }
@@ -189,13 +196,14 @@ private fun SearchHistory(
             }
         } else itemsIndexed(history, key = { _, item -> item }) { _, keyword ->
             Row(
-                modifier = Modifier.fillMaxWidth().height(48.dp).clickable { onSelect(keyword) }.padding(start = 16.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { onSelect(keyword) }.padding(start = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Icon(Icons.Outlined.History, null, Modifier.size(24.dp))
+                Spacer(Modifier.width(16.dp))
                 Text(keyword, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 IconButton({ onRemove(keyword) }) { Icon(Icons.Outlined.Clear, "删除$keyword") }
             }
-            HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }
@@ -259,7 +267,7 @@ private fun SearchResultsContent(
                             item,
                             callbacks,
                             mediaLoadingPolicy,
-                            Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            Modifier,
                         )
                         is SearchItem.UserResult -> SearchUserRow(
                             item.user,
@@ -270,6 +278,9 @@ private fun SearchResultsContent(
                             item.result,
                             callbacks.onOpenForum,
                             Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            subscribed = callbacks.isLocallySubscribed(item.result.forum),
+                            subscriptionUpdating = callbacks.localSubscriptionUpdating,
+                            onToggleSubscription = callbacks.onToggleLocalSubscription?.let { toggle -> { toggle(item.result.forum) } },
                         )
                     }
                     if (index >= state.items.lastIndex - 4 && state.hasMore) {
@@ -396,7 +407,7 @@ private val SearchSort.title: String
 
 private val SearchScope.prompt: String
     get() = when (this) {
-        SearchScope.Global -> "搜索帖子或回复"
+        SearchScope.Global -> "搜索贴吧、帖子或用户"
         is SearchScope.ForumOnly -> "搜索本吧帖子或回复"
     }
 
@@ -409,23 +420,20 @@ private fun SearchThreadRow(
 ) {
     val thread = result.thread
     val forum = thread.forumRoute()
-    ReaderCard(modifier = modifier) {
+    ReaderCard(modifier = modifier, onClick = { callbacks.onOpenThread(result) }, cornerRadius = 0.dp, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
         Column(
             Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             SearchThreadIdentityHeader(thread, forum, callbacks)
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .clickable { callbacks.onOpenThread(result) },
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (thread.title.isNotBlank()) {
                     Text(
                         thread.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        style = dev.infinityf4p.tiebapure.core.designsystem.readerContentStyle(16, 22).copy(fontWeight = FontWeight.SemiBold),
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -433,7 +441,7 @@ private fun SearchThreadRow(
                 thread.textPreview.takeIf(String::isNotBlank)?.let { preview ->
                     Text(
                         preview,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = dev.infinityf4p.tiebapure.core.designsystem.readerContentStyle(14, 20),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = if (thread.title.isBlank()) 3 else 2,
                         overflow = TextOverflow.Ellipsis,
@@ -451,68 +459,33 @@ private fun SearchThreadRow(
             ReaderInteractionStats(
                 comments = thread.replyCount,
                 likes = thread.likeCount,
-                isLiked = thread.isLiked,
-                commentsIcon = Icons.Outlined.ChatBubbleOutline,
-                likesIcon = Icons.Outlined.ThumbUpOffAlt,
-                likedIcon = Icons.Outlined.ThumbUp,
             )
         }
     }
+    dev.infinityf4p.tiebapure.core.designsystem.ReaderContentDivider()
 }
 
 @Composable
-private fun SearchThreadIdentityHeader(
-    thread: ThreadSummary,
-    forum: Forum?,
-    callbacks: SearchCallbacks,
-) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clickable(enabled = forum != null || thread.author.id > 0L) {
-                    if (forum != null) callbacks.onOpenForum(forum) else callbacks.onOpenUser(thread.author)
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            AvatarImage(
-                url = forum?.avatarUrl ?: thread.author.portrait,
-                name = forum?.displayName ?: thread.author.resolvedDisplayName,
-                modifier = Modifier.size(32.dp),
-            )
-        }
-        Column(Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(
-                forum?.displayName ?: thread.author.resolvedDisplayName,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable(enabled = forum != null || thread.author.id > 0L) {
-                    if (forum != null) callbacks.onOpenForum(forum) else callbacks.onOpenUser(thread.author)
-                },
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (forum != null) {
-                    Text(
-                        thread.author.resolvedDisplayName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable(enabled = thread.author.id > 0L) { callbacks.onOpenUser(thread.author) },
-                    )
-                }
-                compactSearchThreadTime(thread.lastReplyAtEpochSeconds)?.let { time ->
-                    Text(
-                        if (forum == null) time else " · $time",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
+private fun SearchThreadIdentityHeader(thread: ThreadSummary, forum: Forum?, callbacks: SearchCallbacks) {
+    var expanded by remember(thread.id) { mutableStateOf(false) }
+    dev.infinityf4p.tiebapure.core.designsystem.ReaderCommunityRow(
+        name = forum?.displayName ?: thread.author.resolvedDisplayName,
+        time = compactSearchThreadTime(thread.createdAtEpochSeconds),
+        onOpen = { if (forum != null) callbacks.onOpenForum(forum) else callbacks.onOpenUser(thread.author) },
+        avatar = { AvatarImage(dev.infinityf4p.tiebapure.core.designsystem.threadIdentityAvatarUrl(thread),
+            forum?.displayName ?: thread.author.resolvedDisplayName, Modifier.size(24.dp)) },
+        subscribed = forum?.let(callbacks.isLocallySubscribed) == true,
+        onSubscribe = forum?.let { f -> callbacks.onToggleLocalSubscription?.let { action -> { if (!callbacks.localSubscriptionUpdating) action(f) } } },
+        more = {
+            Box {
+                IconButton(onClick = { expanded = true }) { Icon(Icons.Outlined.MoreVert, "更多帖子操作", Modifier.size(20.dp)) }
+                DropdownMenu(expanded, { expanded = false }) {
+                    DropdownMenuItem(text = { Text("查看作者：${thread.author.resolvedDisplayName}") }, enabled = thread.author.id > 0,
+                        onClick = { expanded = false; callbacks.onOpenUser(thread.author) })
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -565,8 +538,12 @@ private fun SearchForumRow(
     result: SearchForumResult,
     onOpen: (Forum) -> Unit,
     modifier: Modifier = Modifier,
+    subscribed: Boolean = false,
+    subscriptionUpdating: Boolean = false,
+    onToggleSubscription: (() -> Unit)? = null,
 ) {
-    ReaderCard(modifier = modifier.testTag("search-forum-${result.forum.id}")) {
+    ReaderCard(modifier = modifier.testTag("search-forum-${result.forum.id}")
+        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)), cornerRadius = 16.dp) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -604,6 +581,13 @@ private fun SearchForumRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            onToggleSubscription?.let { toggle ->
+                Button(onClick = toggle, enabled = !subscriptionUpdating, colors = ButtonDefaults.buttonColors(
+                    containerColor = if (subscribed) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.onSurface,
+                    contentColor = if (subscribed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surface)) {
+                    Text(if (subscribed) "已订阅" else "本地订阅")
+                }
             }
         }
     }

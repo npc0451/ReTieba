@@ -23,6 +23,36 @@ import org.junit.Rule
 import org.junit.Test
 
 class SearchScreenTest {
+    @Test
+    fun localSubscriptionActionUpdatesWithoutOpeningTheForum() {
+        val subscribed = androidx.compose.runtime.mutableStateOf(false)
+        var opens = 0
+        val forum = Forum(0, "Android", "Android吧")
+        composeRule.setContent {
+            TiebaPureTheme {
+                SearchScreen(
+                    uiState = SearchUiState(
+                        input = "Android", submittedKeyword = "Android", filter = SearchFilter.Forums,
+                        items = listOf(SearchItem.ForumResult(SearchForumResult(forum, 0, 0, "", true))),
+                        hasMore = false,
+                    ),
+                    callbacks = SearchCallbacks(
+                        isLocallySubscribed = { subscribed.value },
+                        onToggleLocalSubscription = { subscribed.value = !subscribed.value },
+                        onOpenForum = { opens += 1 },
+                    ),
+                    onInputChanged = {}, onSubmit = {}, onClearQuery = {}, onSelectHistory = {},
+                    onRemoveHistory = {}, onClearHistory = {}, onSelectFilter = {}, onSelectSort = {},
+                    onRefresh = {}, onLoadMore = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText("本地订阅").performClick()
+        composeRule.onNodeWithText("已订阅").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("本地订阅").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(0, opens) }
+    }
+
     @get:Rule val composeRule = createComposeRule()
 
     @Test
@@ -34,7 +64,7 @@ class SearchScreenTest {
                 )
             }
         }
-        composeRule.onNodeWithText("搜索历史").assertIsDisplayed()
+        composeRule.onNodeWithText("最近搜索").assertIsDisplayed()
         composeRule.onNodeWithText("历史词").assertIsDisplayed()
     }
 
@@ -189,7 +219,7 @@ class SearchScreenTest {
             .assertIsDisplayed()
         composeRule.onNodeWithText("测试吧").assertIsDisplayed()
         composeRule.onNodeWithText("作者").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("点赞，当前6个赞", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("点赞数，当前6个赞", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test

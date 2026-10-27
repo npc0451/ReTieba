@@ -3,6 +3,9 @@ package dev.infinityf4p.tiebapure.feature.forum
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.infinityf4p.tiebapure.core.model.Forum
+import dev.infinityf4p.tiebapure.core.model.FeedWindow
+import dev.infinityf4p.tiebapure.core.model.containsEpochSeconds
+import dev.infinityf4p.tiebapure.core.model.threadReplyCountOrder
 import dev.infinityf4p.tiebapure.core.model.ForumInfo
 import dev.infinityf4p.tiebapure.core.model.ForumMembership
 import dev.infinityf4p.tiebapure.core.model.ForumPage
@@ -172,6 +175,8 @@ data class ForumThreadsUiState(
     val forum: Forum,
     val category: ForumThreadCategory = ForumThreadCategory.ReplyTime,
     val threads: List<ThreadSummary> = emptyList(),
+    val commentWindow: FeedWindow? = null,
+    val rankingNowEpochSeconds: Long = 0,
     val showsPinned: Boolean = false,
     val showsForumInfo: Boolean = false,
     val forumInfo: ForumInfo? = null,
@@ -191,10 +196,14 @@ data class ForumThreadsUiState(
     val isForumFollowOutcomeUnknown: Boolean = false,
     val forumActionError: String? = null,
 ) {
+    private val candidates: List<ThreadSummary>
+        get() = commentWindow?.let { window -> threads
+            .filter { window.containsEpochSeconds(it.createdAtEpochSeconds, rankingNowEpochSeconds) }
+            .sortedWith(threadReplyCountOrder) } ?: threads
     val pinnedThreads: List<ThreadSummary>
-        get() = threads.filter(ThreadSummary::isTop)
+        get() = candidates.filter(ThreadSummary::isTop)
     val visibleThreads: List<ThreadSummary>
-        get() = if (showsPinned) threads else threads.filterNot(ThreadSummary::isTop)
+        get() = if (showsPinned) candidates else candidates.filterNot(ThreadSummary::isTop)
     val isBusy: Boolean
         get() = isInitialLoading || isRefreshing || isLoadingMore
     val showsEmptyPageContinuation: Boolean
@@ -223,6 +232,7 @@ class ForumThreadsViewModel(
     private val interactionPort: ForumInteractionPort = UnavailableForumInteractionPort,
     private val visitRecorder: ForumVisitRecorder? = null,
     private val infoRepository: ForumInfoRepository = UnavailableForumInfoRepository,
+    private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
         ForumThreadsUiState(
@@ -243,11 +253,15 @@ class ForumThreadsViewModel(
     }
 
     fun selectCategory(category: ForumThreadCategory) {
-        if (_uiState.value.category == category) return
+        if (_uiState.value.category == category) {
+            _uiState.update { it.copy(commentWindow = null) }
+            return
+        }
         invalidateActiveRequest()
         _uiState.update {
             it.copy(
                 category = category,
+                commentWindow = null,
                 threads = emptyList(),
                 isInitialLoading = false,
                 isRefreshing = false,
@@ -258,6 +272,11 @@ class ForumThreadsViewModel(
             )
         }
         refresh(initial = true)
+    }
+
+    fun selectMostCommented(window: FeedWindow) {
+        if (_uiState.value.category != ForumThreadCategory.PublishTime) selectCategory(ForumThreadCategory.PublishTime)
+        _uiState.update { it.copy(commentWindow = window, rankingNowEpochSeconds = nowEpochSeconds()) }
     }
 
     fun togglePinned() {
@@ -285,6 +304,7 @@ class ForumThreadsViewModel(
         val key = ForumThreadsRequestKey(snapshot.category, page = 1)
         _uiState.update {
             it.copy(
+                rankingNowEpochSeconds = if (it.commentWindow != null) nowEpochSeconds() else it.rankingNowEpochSeconds,
                 isInitialLoading = initial && it.threads.isEmpty(),
                 isRefreshing = !initial || it.threads.isNotEmpty(),
                 isLoadingMore = false,

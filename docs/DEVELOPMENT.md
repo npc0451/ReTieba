@@ -1,5 +1,7 @@
 # 开发与项目结构
 
+> ReTieba 在此工程上实现匿名只读产品。下文保留上游协议和模块背景；保留代码类型不代表开放登录、签到、发帖或回复入口。当前可用功能以根目录 README 为准，候选版签名与发布步骤见 [RELEASING.md](RELEASING.md)。
+
 [返回项目首页](../README.md)
 
 ## 开发环境
@@ -59,9 +61,9 @@ export TIEBAPURE_ANDROID_KEY_PASSWORD='<key password>'
 | `feature:forum` | 进吧、贴吧列表、吧内帖子与排序 |
 | `feature:search` | 全局搜索与吧内搜索 |
 | `feature:thread` | 帖子详情、楼层、楼中楼和富文本展示 |
-| `feature:account` | 登录、个人主页、消息、关注关系、收藏和浏览历史 |
-| `feature:composer` | 发帖与回复编辑器、图片和贴吧表情 |
-| `feature:settings` | 外观、阅读、屏蔽、签到与实验性写操作设置 |
+| `feature:account` | 保留上游账号类型，ReTieba 主要复用公开资料与关系读取 |
+| `feature:composer` | 保留的上游编辑器类型，未注册到 ReTieba 导航 |
+| `feature:settings` | 外观、阅读、字体、屏蔽与本地设置 |
 
 顶层 `app` 负责把 `feature:*` 与 `core:*` 组合成完整应用。功能模块通过领域模型和仓库接口表达需求，网络协议、持久化与媒体实现保留在对应的 `core` 模块中。
 

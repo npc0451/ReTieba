@@ -1,6 +1,8 @@
-# TiebaPure for Android Third-Party Notices
+# ReTieba Third-Party Notices
 
-TiebaPure for Android is distributed under GPL-3.0-only. The complete project
+ReTieba is based on infinityf4p/TiebaPure-Android and retains GPL-3.0-only.
+Upstream source: https://github.com/infinityf4p/TiebaPure-Android
+The complete project
 license is bundled as `GPL-3.0-only.txt` next to this notice.
 
 The application includes the following third-party runtime components. Version
@@ -33,3 +35,18 @@ The complete license text and copyright notice are bundled as
 
 This notice describes libraries shipped in the application. Build-only and
 test-only tools are not part of the distributed APK or AAB.
+
+## SIL Open Font License 1.1
+
+- IBM Plex Sans Regular and Medium, from https://github.com/IBM/plex (packages/plex-sans/fonts/complete/ttf).
+  Copyright 2017 IBM Corp. Reserved Font Name: Plex.
+  The complete license is bundled as `IBM-Plex-OFL.txt` next to this notice.
+  Chinese glyphs fall back to platform fonts; user-selected reader fonts remain unchanged.
+
+## Project artwork and documentation screenshots
+
+The ReTieba launcher artwork and the homepage screenshot were supplied by the
+project maintainer. The screenshot illustrates the application interface.
+Third-party posts, avatars, logos and media visible within it retain their
+respective rights and licenses; their inclusion does not relicense that content
+under the project's source-code license.

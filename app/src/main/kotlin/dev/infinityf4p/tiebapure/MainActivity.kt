@@ -2,6 +2,7 @@ package dev.infinityf4p.tiebapure
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -23,6 +24,22 @@ class MainActivity : ComponentActivity() {
                 onExternalNavigationConsumed = ::consumeExternalNavigation,
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (application as TiebaPureApplication).requestCacheMaintenance()
+    }
+
+    override fun onPause() {
+        (application as TiebaPureApplication).noteCacheInteraction(false)
+        super.onPause()
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        (application as TiebaPureApplication).noteCacheInteraction(
+            event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL)
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onNewIntent(intent: Intent) {

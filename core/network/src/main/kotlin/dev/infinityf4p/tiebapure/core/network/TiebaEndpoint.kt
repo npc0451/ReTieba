@@ -24,6 +24,7 @@ data class TiebaEndpoint(
         val InitNickname = endpoint(APP, "/c/s/initNickname", EndpointAccess.Authentication)
         val WebMyInfo = endpoint(WEB, "/mo/q/newmoindex", EndpointAccess.AuthenticatedRead)
         val FollowedForums = endpoint(APP, "/c/f/forum/like", EndpointAccess.AuthenticatedRead)
+        val PublicUserForums = endpoint(APP, "/c/f/forum/like", EndpointAccess.AnonymousRead)
         val ForumPageForm = endpoint(APP, "/c/f/frs/page", EndpointAccess.AnonymousRead)
         val Personalized = endpoint(WEB, "/c/f/excellent/personalized", EndpointAccess.AnonymousRead, "cmd" to "309264")
         val ForumPage = endpoint(PROTOBUF, "/c/f/frs/page", EndpointAccess.AuthenticatedRead, "cmd" to "301001")
@@ -101,6 +102,7 @@ data class TiebaEndpoint(
             InitNickname,
             WebMyInfo,
             FollowedForums,
+            PublicUserForums,
             ForumPageForm,
             Personalized,
             ForumPage,

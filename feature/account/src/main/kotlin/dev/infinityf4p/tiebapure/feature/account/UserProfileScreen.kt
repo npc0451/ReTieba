@@ -56,16 +56,19 @@ fun UserProfileRoute(
     viewModel: UserProfileViewModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
     onEditProfile: (UserProfile) -> Unit = {},
     onOpenRelationship: (following: Boolean) -> Unit = {},
     onOpenForum: (Forum) -> Unit = {},
     onOpenThread: (ThreadSummary) -> Unit = {},
+    localActions: @Composable () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     UserProfileScreen(
         state = state,
         onBack = onBack,
         modifier = modifier,
+        readOnly = readOnly,
         onRetry = viewModel::refresh,
         onToggleFollow = viewModel::toggleFollow,
         onSelectTab = viewModel::selectTab,
@@ -75,6 +78,8 @@ fun UserProfileRoute(
         onOpenRelationship = onOpenRelationship,
         onOpenForum = onOpenForum,
         onOpenThread = onOpenThread,
+        onLoadMoreForums = viewModel::loadMoreForums,
+        localActions = localActions,
     )
 }
 
@@ -83,6 +88,7 @@ fun UserProfileScreen(
     state: UserProfileUiState,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
     onRetry: () -> Unit = {},
     onToggleFollow: () -> Unit = {},
     onSelectTab: (UserProfileTab) -> Unit = {},
@@ -92,6 +98,8 @@ fun UserProfileScreen(
     onOpenRelationship: (following: Boolean) -> Unit = {},
     onOpenForum: (Forum) -> Unit = {},
     onOpenThread: (ThreadSummary) -> Unit = {},
+    onLoadMoreForums: () -> Unit = {},
+    localActions: @Composable () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         AccountScreenHeader("用户主页", onBack)
@@ -103,6 +111,7 @@ fun UserProfileScreen(
                 onRetry = onRetry,
             )
             profile != null -> ProfileContent(
+                readOnly = readOnly,
                 state,
                 onRetry,
                 onToggleFollow,
@@ -113,6 +122,8 @@ fun UserProfileScreen(
                 onOpenRelationship,
                 onOpenForum,
                 onOpenThread,
+                onLoadMoreForums,
+                localActions,
             )
             else -> ReaderStatePane(ReaderState.Empty("用户资料不可用"))
         }
@@ -122,6 +133,7 @@ fun UserProfileScreen(
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun ProfileContent(
+    readOnly: Boolean,
     state: UserProfileUiState,
     onRetry: () -> Unit,
     onToggleFollow: () -> Unit,
@@ -132,18 +144,22 @@ private fun ProfileContent(
     onOpenRelationship: (Boolean) -> Unit,
     onOpenForum: (Forum) -> Unit,
     onOpenThread: (ThreadSummary) -> Unit,
+    onLoadMoreForums: () -> Unit,
+    localActions: @Composable () -> Unit,
 ) {
     val profile = requireNotNull(state.profile)
     var pendingDeleteThreadId by remember { mutableStateOf<Long?>(null) }
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
         item(key = "profile-header") {
             ProfileHeader(
+                readOnly = readOnly,
                 profile,
                 state.isMutatingFollow || state.isFollowOutcomeUnknown,
                 onToggleFollow,
                 onEditProfile,
                 onOpenRelationship,
             )
+            localActions()
         }
         state.actionError?.let {
             item(key = "profile-action-error") {
@@ -186,7 +202,7 @@ private fun ProfileContent(
                         AccountThreadRow(
                             thread = thread,
                             onClick = { onOpenThread(thread) },
-                            trailing = state.deletionTargets[thread.id]?.takeIf { profile.isCurrentUser }?.let {
+                            trailing = state.deletionTargets[thread.id]?.takeIf { !readOnly && profile.isCurrentUser }?.let {
                                 {
                                     IconButton(
                                         onClick = { pendingDeleteThreadId = thread.id },
@@ -214,6 +230,21 @@ private fun ProfileContent(
                         ProfileForumRow(forum) { onOpenForum(forum) }
                     }
                 }
+                if (profile.followedForumsVisibility != UserContentVisibility.Private) item {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        if (profile.followedForumCount > profile.followedForums.size) Text(
+                            "当前已加载 ${profile.followedForums.size} / ${profile.followedForumCount} 个关注吧。",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        state.forumError?.let { Text("公开列表读取失败：$it", color = MaterialTheme.colorScheme.error) }
+                        if (!state.isLoadingForums && !state.hasMoreForums && profile.followedForumCount > profile.followedForums.size) Text(
+                            "接口仅返回了这些公开条目，完整列表可能受服务端限制。",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (state.isLoadingForums) androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp))
+                        else if (state.hasMoreForums) androidx.compose.material3.TextButton(onClick = onLoadMoreForums) {
+                            Text(if (state.forumError == null) "加载更多关注的吧" else "重试公开列表")
+                        }
+                    }
+                }
             }
         }
     }
@@ -237,6 +268,7 @@ private fun ProfileContent(
 
 @Composable
 private fun ProfileHeader(
+    readOnly: Boolean,
     profile: UserProfile,
     isMutatingFollow: Boolean,
     onToggleFollow: () -> Unit,
@@ -260,18 +292,7 @@ private fun ProfileHeader(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    profile.user.level?.takeIf { it > 0 }?.let {
-                        Text(
-                            "Lv.$it",
-                            modifier = Modifier.clip(RoundedCornerShape(5.dp))
-                                .background(MaterialTheme.colorScheme.tertiaryContainer)
-                                .padding(horizontal = 6.dp, vertical = 3.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            maxLines = 1,
-                        )
-                    }
+
                 }
                 profileIdentityMetadata(profile).takeIf(String::isNotEmpty)?.let {
                     Text(
@@ -281,11 +302,11 @@ private fun ProfileHeader(
                     )
                 }
             }
-            if (profile.isCurrentUser) {
+            if (!readOnly && profile.isCurrentUser) {
                 OutlinedButton(onClick = { onEditProfile(profile) }, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text("编辑资料")
                 }
-            } else {
+            } else if (!readOnly) {
                 Button(
                     onClick = onToggleFollow,
                     enabled = !isMutatingFollow,
@@ -307,8 +328,8 @@ private fun ProfileHeader(
         HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ProfileMetric("获赞", profile.agreeCount, modifier = Modifier.weight(1f))
-            ProfileMetric("关注", profile.followingCount, modifier = Modifier.weight(1f)) { onOpenRelationship(true) }
-            ProfileMetric("粉丝", profile.followerCount, modifier = Modifier.weight(1f)) { onOpenRelationship(false) }
+            ProfileMetric("关注", profile.followingCount, modifier = Modifier.weight(1f), onClick = if (readOnly) null else ({ onOpenRelationship(true) }))
+            ProfileMetric("粉丝", profile.followerCount, modifier = Modifier.weight(1f), onClick = if (readOnly) null else ({ onOpenRelationship(false) }))
         }
     }
 }

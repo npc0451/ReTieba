@@ -20,6 +20,13 @@ import kotlin.test.assertTrue
 
 class SearchViewModelTest {
     @Test
+    fun directorySearchStartsWithForumsFilter() = withViewModel(initialFilter = SearchFilter.Forums) { viewModel, repository ->
+        assertEquals(SearchFilter.Forums, viewModel.uiState.value.filter)
+        viewModel.updateInput("安卓")
+        viewModel.submit()
+        assertEquals(SearchFilter.Forums, repository.calls.single().filter)
+    }
+    @Test
     fun changingFilterCancelsBusyRequestAndLoadsNewGeneration() = withViewModel { viewModel, repository ->
         viewModel.updateInput("测试")
         viewModel.submit()
@@ -134,12 +141,13 @@ class SearchViewModelTest {
 
     private fun withViewModel(
         searchScope: SearchScope = SearchScope.Global,
+        initialFilter: SearchFilter? = null,
         block: (SearchViewModel, ControllableSearchRepository) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
             val repository = ControllableSearchRepository()
-            block(SearchViewModel(repository, scope, searchScope), repository)
+            block(SearchViewModel(repository, scope, searchScope, initialFilter), repository)
         } finally {
             scope.cancel()
         }

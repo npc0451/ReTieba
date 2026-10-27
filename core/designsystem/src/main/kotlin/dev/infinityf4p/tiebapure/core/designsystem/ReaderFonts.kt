@@ -8,6 +8,20 @@ import dev.infinityf4p.tiebapure.core.model.ReaderFontFamily
 import java.util.concurrent.ConcurrentHashMap
 
 val LocalReaderFontRevision = staticCompositionLocalOf { 0L }
+val LocalReadingPreferences = staticCompositionLocalOf { dev.infinityf4p.tiebapure.core.model.ReadingPreferences() }
+val LocalCommunityColors = staticCompositionLocalOf { true }
+val LocalReaderTransitionActive = staticCompositionLocalOf { false }
+val LocalPostBarColor = staticCompositionLocalOf<(androidx.compose.ui.graphics.Color?) -> Unit> { {} }
+
+@Composable
+fun readerContentStyle(size: Int, lineHeight: Int): androidx.compose.ui.text.TextStyle {
+    val preferences = LocalReadingPreferences.current
+    return androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
+        fontFamily = readerFontFamily(preferences.fontFamily),
+        fontSize = androidx.compose.ui.unit.TextUnit(size * preferences.fontSize.scale, androidx.compose.ui.unit.TextUnitType.Sp),
+        lineHeight = androidx.compose.ui.unit.TextUnit(lineHeight * preferences.fontSize.scale * preferences.lineSpacing.multiplier, androidx.compose.ui.unit.TextUnitType.Sp),
+    )
+}
 
 object ReaderTypefaceRegistry {
     private val imported = ConcurrentHashMap<String, Typeface>()
@@ -24,6 +38,7 @@ object ReaderTypefaceRegistry {
 
     fun resolve(family: ReaderFontFamily): FontFamily = when (family) {
         ReaderFontFamily.System -> FontFamily.Default
+        ReaderFontFamily.Plex -> BrandFontFamily
         ReaderFontFamily.Serif -> FontFamily.Serif
         ReaderFontFamily.Rounded -> rounded
         ReaderFontFamily.Monospace -> FontFamily.Monospace

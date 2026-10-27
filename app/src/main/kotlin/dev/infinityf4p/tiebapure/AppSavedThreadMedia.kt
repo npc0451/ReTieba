@@ -156,7 +156,7 @@ class AppSavedThreadMediaStore(context: Context) {
                     return
                 }
                 if (!attemptSavedThreadMedia {
-                    commitFile(url, SavedThreadMediaKind.Image, imageLoader.load(url), "img")
+                    imageLoader.acquire(url).use { commitFile(url, SavedThreadMediaKind.Image, it.file, "img") }
                 }) mediaComplete = false
             }
 

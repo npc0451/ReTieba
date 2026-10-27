@@ -19,6 +19,15 @@ import org.junit.Test
 
 class SavedThreadBlobCodecTest {
     @Test
+    fun subscriptionSummariesRoundTripAndRejectTampering() {
+        val threads = listOf(snapshot().thread)
+        val encoded = SavedThreadBlobCodec.encodeSummaries(threads)
+        assertEquals(threads, SavedThreadBlobCodec.decodeSummaries(encoded))
+        encoded[8] = (encoded[8].toInt() xor 1).toByte()
+        assertThrows(IllegalStateException::class.java) { SavedThreadBlobCodec.decodeSummaries(encoded) }
+    }
+
+    @Test
     fun allContentTypesRoundTrip() {
         val snapshot = snapshot()
 

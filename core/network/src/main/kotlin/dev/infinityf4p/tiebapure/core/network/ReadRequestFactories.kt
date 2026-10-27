@@ -9,6 +9,13 @@ import okhttp3.Request
 private const val MESSAGE_CLIENT_VERSION = "8.2.2"
 
 object TiebaReadRequestFactory {
+    fun publicUserForums(userId: Long, page: Int, builder: TiebaRequestBuilder): Request {
+        require(userId > 0)
+        return builder.formRequest(TiebaEndpoint.PublicUserForums, mapOf(
+            "_client_type" to "2", "_client_version" to TiebaClientVersion.V12.value,
+            "friend_uid" to userId.toString(), "page_no" to TiebaRequestValuePolicy.page(page).toString(), "page_size" to "50",
+        ), signingSecret = TiebaFormSigner.DEFAULT_SECRET)
+    }
     fun followedForums(account: Account, page: Int, builder: TiebaRequestBuilder): Request {
         val cuid = builder.device.miniCuid
         val fields = mapOf(

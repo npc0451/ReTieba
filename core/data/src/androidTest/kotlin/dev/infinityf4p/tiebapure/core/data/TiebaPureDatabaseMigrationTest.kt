@@ -107,6 +107,60 @@ class TiebaPureDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrationFromFourPreservesReadingAndOfflineDataAndAddsLocalLibrary() {
+        helper.createDatabase(DATABASE_NAME, 4).apply {
+            execSQL("INSERT INTO browsing_history (thread_id,title,author_name,forum_name,visited_at_ms) VALUES (8,'kept','author','forum',10)")
+            execSQL("INSERT INTO reading_positions (thread_id,post_id,floor,updated_at_ms) VALUES (8,'123',7,10)")
+            execSQL("INSERT INTO saved_threads (thread_id,title,author_name,forum_name,saved_at_ms,snapshot_blob) VALUES (9,'saved','author','forum',11,X'0102')")
+            close()
+        }
+        helper.runMigrationsAndValidate(DATABASE_NAME, 5, true, TiebaPureDatabase.MIGRATION_4_5).use { database ->
+            database.query("SELECT title FROM browsing_history WHERE thread_id = 8").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("kept", cursor.getString(0))
+            }
+            database.query("SELECT post_id,floor FROM reading_positions WHERE thread_id = 8").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("123", cursor.getString(0))
+                assertEquals(7, cursor.getInt(1))
+            }
+            database.query("SELECT snapshot_blob FROM saved_threads WHERE thread_id = 9").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertArrayEquals(byteArrayOf(1, 2), cursor.getBlob(0))
+            }
+            listOf("local_subscriptions", "local_bookmarks", "forum_feed_cache").forEach { table ->
+                database.query("SELECT COUNT(*) FROM $table").use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals(0, cursor.getInt(0))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun migrationFromFiveKeepsLocalLibraryAndAddsFollowing() {
+        helper.createDatabase(DATABASE_NAME, 5).apply {
+            execSQL("INSERT INTO local_subscriptions VALUES ('android',1,'android','android吧',NULL,1)")
+            execSQL("INSERT INTO local_bookmarks VALUES (9,'kept','author','android',1)")
+            close()
+        }
+        helper.runMigrationsAndValidate(DATABASE_NAME, 6, true, TiebaPureDatabase.MIGRATION_5_6).use { db ->
+            listOf("local_subscriptions", "local_bookmarks").forEach { table ->
+                db.query("SELECT COUNT(*) FROM $table").use { cursor ->
+                    assertTrue(cursor.moveToFirst()); assertEquals(1, cursor.getInt(0))
+                }
+            }
+            db.execSQL("PRAGMA foreign_keys = ON")
+            db.execSQL("INSERT INTO local_user_follows VALUES (42,'name','user','portrait',1)")
+            db.execSQL("INSERT INTO user_feed_cache VALUES (42,1,X'0102')")
+            db.execSQL("DELETE FROM local_user_follows WHERE user_id=42")
+            db.query("SELECT COUNT(*) FROM user_feed_cache").use { cursor ->
+                assertTrue(cursor.moveToFirst()); assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
         const val DATABASE_NAME = "draft-migration-test"
     }

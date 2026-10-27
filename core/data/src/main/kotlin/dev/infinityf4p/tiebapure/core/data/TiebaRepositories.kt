@@ -67,6 +67,8 @@ interface SearchRepository {
 }
 
 interface UserRepository {
+    suspend fun followedForums(userId: Long, page: Int): dev.infinityf4p.tiebapure.core.model.UserForumsPage =
+        throw UnsupportedOperationException("公开关注吧列表暂不可用。")
     suspend fun profile(user: UserSummary, account: Account? = null): UserProfile
     suspend fun threads(userId: Long, page: Int, account: Account? = null): UserThreadsPage
 }
@@ -122,6 +124,7 @@ class NetworkSearchRepository(private val service: TiebaReadService) : SearchRep
 }
 
 class NetworkUserRepository(private val service: TiebaReadService) : UserRepository {
+    override suspend fun followedForums(userId: Long, page: Int) = service.userForums(userId, page)
     override suspend fun profile(user: UserSummary, account: Account?) = service.userProfile(account, user)
     override suspend fun threads(userId: Long, page: Int, account: Account?) = service.userThreads(account, userId, page)
 }

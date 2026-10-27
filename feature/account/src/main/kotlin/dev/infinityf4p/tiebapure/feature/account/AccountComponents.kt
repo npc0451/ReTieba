@@ -154,14 +154,14 @@ internal fun AccountThreadRow(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(
                 thread.title.ifBlank { "无标题" },
-                style = MaterialTheme.typography.titleSmall,
+                style = dev.infinityf4p.tiebapure.core.designsystem.readerContentStyle(16,22),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             thread.textPreview.takeIf(String::isNotBlank)?.let {
                 Text(
                     it,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = dev.infinityf4p.tiebapure.core.designsystem.readerContentStyle(14,20),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,

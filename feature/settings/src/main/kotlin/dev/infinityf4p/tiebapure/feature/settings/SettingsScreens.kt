@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.DownloadDone
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FontDownload
@@ -75,7 +76,7 @@ import dev.infinityf4p.tiebapure.core.model.ReadingPreferences
 import dev.infinityf4p.tiebapure.core.model.ThreadReplySort
 import java.net.URI
 
-enum class SettingsDestination { Reading, SavedThreads, Blocklist, About }
+enum class SettingsDestination { Reading, SavedThreads, Blocklist, About, Storage }
 
 @Immutable
 data class SettingsUiState(
@@ -167,24 +168,24 @@ fun SettingsScreen(
     onOpen: (SettingsDestination) -> Unit,
     onLogout: () -> Unit,
 ) {
-    var confirmsLogout by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item { ReaderSectionHeader("显示模式", trailing = appearanceLabel(state.settings.appearance)) }
         item {
-            Row(
-                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(12.dp),
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 SettingsAppearance.entries.forEach { appearance ->
                     FilterChip(
                         selected = state.settings.appearance == appearance,
                         onClick = { onAppearanceChange(appearance) },
-                        label = { Text(appearanceLabel(appearance)) },
+                        label = { Text(appearanceLabel(appearance), maxLines = 1) },
                         leadingIcon = { Icon(appearanceIcon(appearance), contentDescription = null) },
-                        modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                        modifier = Modifier.heightIn(min = 48.dp),
                     )
                 }
             }
@@ -197,55 +198,24 @@ fun SettingsScreen(
         item {
             SettingsSectionSurface {
                 Column {
-                    SettingsSwitchRow("允许发帖", Icons.Outlined.EditNote, state.settings.postingEnabled, onPostingEnabledChange)
-                    SettingsSwitchRow("允许回帖", Icons.AutoMirrored.Outlined.Reply, state.settings.replyingEnabled, onReplyingEnabledChange)
-                    SettingsSwitchRow("允许点赞", Icons.Outlined.ThumbUpOffAlt, state.settings.likingEnabled, onLikingEnabledChange)
                     ReaderNavigationRow("阅读设置", icon = Icons.Outlined.FormatSize) { onOpen(SettingsDestination.Reading) }
-                    ReaderNavigationRow("本地保存的帖子", icon = Icons.Outlined.DownloadDone) {
+                    ReaderNavigationRow("离线保存的帖子", icon = Icons.Outlined.DownloadDone) {
                         onOpen(SettingsDestination.SavedThreads)
                     }
                     ReaderNavigationRow("屏蔽设置", icon = Icons.Outlined.Block) { onOpen(SettingsDestination.Blocklist) }
+                    ReaderNavigationRow("存储与缓存", icon = Icons.Outlined.Storage) { onOpen(SettingsDestination.Storage) }
                 }
             }
-            SettingsFooter(
-                "发帖和回帖使用非官方实验接口。开启并使用后，可能触发贴吧风控，造成内容被隐藏或删除、账号功能受限；极端情况下账号可能被冻结。请确认能够承担风险后再使用。关闭点赞后仍会显示点赞数量；设置和屏蔽规则仅保存在本机。",
-            )
+            SettingsFooter("无需登录，仅浏览公开内容。阅读偏好、屏蔽规则和离线保存仅保存在本机。")
         }
 
-        state.account?.let { account ->
-            item { ReaderSectionHeader("签到") }
-            item {
-                SettingsSectionSurface {
-                    Column {
-                        SettingsSwitchRow("自动签到", Icons.Outlined.CheckCircleOutline, state.settings.automaticSignEnabled, onAutoSignEnabledChange)
-                        ReaderNavigationRow(
-                            title = if (state.isSigning) "正在签到" else "立即签到",
-                            icon = if (state.isSigning) Icons.Outlined.Refresh else Icons.Outlined.AutoAwesome,
-                            enabled = !state.isSigning,
-                            onClick = onSignNow,
-                        )
-                    }
-                }
-                SettingsFooter(
-                    state.signStatus ?: "签到会按关注列表逐个请求，需要几秒到几十秒；同一天只会自动执行一次。",
-                )
-            }
-            item { ReaderSectionHeader("账号") }
-            item {
-                AccountSettingsRow(account)
-            }
-            item {
-                Spacer(Modifier.heightIn(min = 16.dp))
-                SettingsSectionSurface {
-                    ReaderNavigationRow(
-                        title = if (state.isLoggingOut) "正在退出" else "退出登录",
-                        icon = Icons.AutoMirrored.Outlined.Logout,
-                        enabled = !state.isLoggingOut,
-                        onClick = { confirmsLogout = true },
-                    )
-                }
+        item { ReaderSectionHeader("关于") }
+        item {
+            SettingsSectionSurface {
+                ReaderNavigationRow("关于与开源许可") { onOpen(SettingsDestination.About) }
             }
         }
+
         state.operationError?.let { error ->
             item {
                 Text(
@@ -258,23 +228,15 @@ fun SettingsScreen(
         }
     }
 
-    if (confirmsLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmsLogout = false },
-            title = { Text("退出登录？") },
-            text = { Text("这会清除本机保存的百度登录状态。") },
-            confirmButton = {
-                TextButton(onClick = { confirmsLogout = false; onLogout() }) { Text("退出登录") }
-            },
-            dismissButton = { TextButton(onClick = { confirmsLogout = false }) { Text("取消") } },
-        )
-    }
+
 }
 
 @Composable
 private fun SettingsSectionSurface(content: @Composable () -> Unit) {
     androidx.compose.material3.Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         color = MaterialTheme.colorScheme.surface,
         content = content,
     )
@@ -380,7 +342,11 @@ fun ReadingSettingsScreen(
         items(ReaderFontFamily.builtIn, key = ReaderFontFamily::rawValue) { family ->
             RadioChoiceRow(
                 title = readerFontFamilyLabel(family),
-                subtitle = if (family == ReaderFontFamily.System) "跟随 Android 系统字体" else "应用到帖子标题和正文",
+                subtitle = when (family) {
+                    ReaderFontFamily.System -> "跟随 Android 系统字体"
+                    ReaderFontFamily.Plex -> "内置英文字体，中文使用系统回退"
+                    else -> "统一用于正文、姓名、吧名与界面标题"
+                },
                 selected = preferences.fontFamily == family,
                 onClick = { onChange(preferences.copy(fontFamily = family)) },
             )
@@ -672,27 +638,31 @@ fun AboutSettingsScreen(
     modifier: Modifier = Modifier,
     onOpenUrl: (String) -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val appName = remember(context) { context.applicationInfo.loadLabel(context.packageManager).toString() }
+
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
-        item { ReaderSectionHeader("TiebaPure") }
+        item { ReaderSectionHeader(appName) }
         item {
             Column(
                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("TiebaPure", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
+                Text("Pure Tieba Reader", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("版本 ${info.versionName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("以浏览为主的非官方百度贴吧客户端；登录后支持关注、点赞，以及实验性的发帖与回复。与百度公司及贴吧官方无隶属、授权或认可关系。")
+                Text("基于 TiebaPure 改造的免登录只读贴吧客户端，支持公开内容阅读、本地订阅、收藏和离线保存。与百度公司及贴吧官方无隶属、授权或认可关系。")
             }
         }
         item { ReaderSectionHeader("项目") }
         item {
             SettingsSectionSurface {
                 Column {
-                    ReaderNavigationRow("查看源代码", icon = Icons.Outlined.Link) { onOpenUrl(info.projectUrl) }
-                    ReaderNavigationRow("项目作者", subtitle = "infinityf4p") { onOpenUrl(info.authorUrl) }
+                    ReaderNavigationRow("原项目源码", icon = Icons.Outlined.Link) { onOpenUrl(info.projectUrl) }
+                    ReaderNavigationRow("原项目作者", subtitle = "infinityf4p") { onOpenUrl(info.authorUrl) }
                 }
             }
         }
@@ -708,7 +678,7 @@ fun AboutSettingsScreen(
         item { ReaderSectionHeader("本机数据") }
         item {
             Text(
-                "阅读偏好、功能开关、屏蔽规则和草稿保存在本机。卸载应用或清除应用数据后，这些内容会被删除。",
+                "阅读偏好、浏览历史、屏蔽规则、订阅、收藏及离线内容保存在本机。卸载应用或清除应用数据后，这些内容会被删除。",
                 modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(16.dp),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -737,6 +707,7 @@ private fun fontSizeLabel(value: ReaderFontSize): String = when (value) {
 
 private fun readerFontFamilyLabel(value: ReaderFontFamily): String = when (value) {
     ReaderFontFamily.System -> "系统"
+    ReaderFontFamily.Plex -> "IBM Plex Sans"
     ReaderFontFamily.Serif -> "衬线"
     ReaderFontFamily.Rounded -> "圆体"
     ReaderFontFamily.Monospace -> "等宽"

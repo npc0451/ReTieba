@@ -42,6 +42,8 @@ fun interface LoginRepository {
 }
 
 interface UserProfileRepository {
+    suspend fun loadForums(user: UserSummary, page: Int): dev.infinityf4p.tiebapure.core.model.UserForumsPage =
+        throw UnsupportedOperationException("公开关注吧列表暂不可用。")
     suspend fun loadProfile(user: UserSummary): UserProfile
     suspend fun loadThreads(user: UserSummary, page: Int): UserThreadsPage
     suspend fun setFollow(user: UserSummary, followed: Boolean): Boolean

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -111,6 +112,13 @@ fun selectThreadMediaPreview(
     )
 }
 
+fun threadMediaPreviewAspectRatio(blocks: List<ContentBlock>): Float {
+    val selection = selectThreadMediaPreview(blocks)
+    if (selection.items.size != 1) return 3f
+    val image = blocks.getOrNull(selection.items.single().blockIndex) as? ContentBlock.Image
+    return image?.value?.aspectRatio?.toFloat()?.coerceIn(0.65f, 1.8f) ?: (16f / 9f)
+}
+
 @Composable
 fun ThreadMediaPreview(
     blocks: List<ContentBlock>,
@@ -122,12 +130,14 @@ fun ThreadMediaPreview(
     val selection = remember(blocks) { selectThreadMediaPreview(blocks) }
     var manuallyLoadedItems by remember(blocks, mediaLoadingPolicy) { mutableStateOf(emptySet<Int>()) }
     if (selection.items.isEmpty()) return
+    val singleImage = selection.items.singleOrNull()?.let { blocks.getOrNull(it.blockIndex) as? ContentBlock.Image }
 
     Box(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(if (selection.items.size == 1) 2f else 3f)
+            modifier = (if (singleImage != null) Modifier.widthIn(max = 320.dp)
+                .fillMaxWidth(if (singleImage.value.aspectRatio >= 1.25) 1f else 0.72f)
+                else Modifier.fillMaxWidth())
+                .aspectRatio(threadMediaPreviewAspectRatio(blocks))
                 .heightIn(min = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {

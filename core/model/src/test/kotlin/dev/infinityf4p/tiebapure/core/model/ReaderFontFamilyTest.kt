@@ -10,7 +10,9 @@ class ReaderFontFamilyTest {
         val digest = "a".repeat(64)
         val imported = checkNotNull(ReaderFontFamily.imported(digest))
 
-        assertEquals(ReaderFontFamily.Serif, ReaderFontFamily.fromRaw("serif"))
+        ReaderFontFamily.builtIn.forEach { assertEquals(it, ReaderFontFamily.fromRaw(it.rawValue)) }
+        assertEquals(ReaderFontFamily.Plex, ReaderFontFamily.fromRaw("plex"))
+        assertEquals(ReaderFontFamily.System, ReadingPreferences().fontFamily)
         assertEquals(imported, ReaderFontFamily.fromRaw(imported.rawValue))
         assertEquals(digest, imported.importedId)
     }

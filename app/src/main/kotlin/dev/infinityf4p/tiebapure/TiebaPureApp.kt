@@ -10,6 +10,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,16 +20,28 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.DynamicFeed
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.DownloadDone
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,6 +52,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -54,6 +70,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -72,7 +89,6 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
@@ -121,8 +137,6 @@ import dev.infinityf4p.tiebapure.feature.account.UserRelationshipsViewModel
 import dev.infinityf4p.tiebapure.feature.composer.ComposerViewModel
 import dev.infinityf4p.tiebapure.feature.composer.ComposerSubmissionCapability
 import dev.infinityf4p.tiebapure.feature.composer.ContentComposerRoute
-import dev.infinityf4p.tiebapure.feature.forum.ForumHubRoute
-import dev.infinityf4p.tiebapure.feature.forum.ForumHubViewModel
 import dev.infinityf4p.tiebapure.feature.forum.ForumThreadsCallbacks
 import dev.infinityf4p.tiebapure.feature.forum.ForumThreadsCapabilities
 import dev.infinityf4p.tiebapure.feature.forum.ForumThreadsRoute
@@ -181,21 +195,24 @@ internal fun expandedPaneWidthsFor(width: Dp): ExpandedPaneWidths {
     return ExpandedPaneWidths(list = list, detail = available - list)
 }
 
-private enum class RootDestination(val route: String, val label: String) {
-    Home("home", "首页"),
-    Forums("forums", "进吧"),
-    Me("me", "我的"),
+internal enum class RootDestination(val route: String, val label: String) {
+    Home("home", "推荐"),
+    Forums("forums", "订阅"),
+    Browse("forum-hub", "进吧"),
+    Local("local", "收藏"),
+    Settings("settings", "设置"),
 }
 
 private object Routes {
     const val DetailEmpty = "detail-empty"
     const val Search = "search"
-    const val SearchPattern = "$Search?query={query}"
+    const val SearchPattern = "$Search?query={query}&forumFirst={forumFirst}"
     const val ForumSearch = "search/forum/{forumName}"
     const val Forum = "forum/{forumName}"
     const val Thread = "thread/{threadId}?postId={postId}&initialDestination={initialDestination}"
     const val Login = "login"
     const val Settings = "settings"
+    const val Storage = "settings/storage"
     const val Reading = "settings/reading"
     const val Blocklist = "settings/blocklist"
     const val About = "about"
@@ -238,8 +255,11 @@ internal fun TiebaPureRoot(
             }
         }
     }
-    TiebaPureTheme(darkTheme = darkTheme) {
-        CompositionLocalProvider(LocalReaderFontRevision provides readerFontRevision) {
+    CompositionLocalProvider(LocalReaderFontRevision provides readerFontRevision,
+        dev.infinityf4p.tiebapure.core.designsystem.LocalCommunityColors provides settings.communityColors,
+        dev.infinityf4p.tiebapure.core.designsystem.LocalReadingPreferences provides settings.reading) {
+        TiebaPureTheme(darkTheme = darkTheme,
+            fontFamily = dev.infinityf4p.tiebapure.core.designsystem.readerFontFamily(settings.reading.fontFamily)) {
             TiebaPureApp(
                 container = container,
                 settings = settings,
@@ -257,7 +277,6 @@ internal fun TiebaPureApp(
     externalNavigationEvent: ExternalNavigationEvent? = null,
     onExternalNavigationConsumed: (Long) -> Unit = {},
 ) {
-    val sessionExpirationNotice by container.sessionExpiration.notice.collectAsStateWithLifecycle()
     val rootNavController = rememberNavController()
     val listPaneNavController = rememberNavController()
     var selectedDestination by rememberSaveable { mutableStateOf(RootDestination.Home) }
@@ -278,6 +297,17 @@ internal fun TiebaPureApp(
         onExternalNavigationConsumed(event.id)
     }
 
+    var currentPostBar by remember { mutableStateOf<androidx.compose.ui.graphics.Color?>(null) }
+    val updatePostBarColor = remember { { color: androidx.compose.ui.graphics.Color? -> currentPostBar = color } }
+    val defaultLightStatus = MaterialTheme.colorScheme.background.luminance() > .5f
+    val rootView = androidx.compose.ui.platform.LocalView.current
+    SideEffect {
+        (rootView.context as? android.app.Activity)?.let { activity ->
+            WindowCompat.getInsetsController(activity.window, rootView).isAppearanceLightStatusBars =
+                currentPostBar?.let { it.luminance() > .5f } ?: defaultLightStatus
+        }
+    }
+    CompositionLocalProvider(dev.infinityf4p.tiebapure.core.designsystem.LocalPostBarColor provides updatePostBarColor) {
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -312,7 +342,7 @@ internal fun TiebaPureApp(
                     }
                 }
                 Scaffold(
-                    containerColor = MaterialTheme.colorScheme.background,
+                    containerColor = currentPostBar ?: MaterialTheme.colorScheme.background,
                     bottomBar = {
                         if (compactShowsRootNavigation) RootNavigationBar(selectedDestination, navigateToRoot)
                     },
@@ -323,6 +353,7 @@ internal fun TiebaPureApp(
                         navController = rootNavController,
                         onSelectRoot = navigateToRoot,
                         homeRefreshRequest = homeRefreshRequest,
+                        rootScope = selectedDestination.route,
                         modifier = Modifier.padding(padding),
                     )
                 }
@@ -349,6 +380,7 @@ internal fun TiebaPureApp(
                         navController = rootNavController,
                         onSelectRoot = navigateToRoot,
                         homeRefreshRequest = homeRefreshRequest,
+                        rootScope = selectedDestination.route,
                         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
                     )
                 } else {
@@ -361,6 +393,7 @@ internal fun TiebaPureApp(
                             navController = rootNavController,
                             onSelectRoot = navigateToRoot,
                             homeRefreshRequest = homeRefreshRequest,
+                        rootScope = selectedDestination.route,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -390,6 +423,7 @@ internal fun TiebaPureApp(
                         navController = rootNavController,
                         onSelectRoot = navigateToRoot,
                         homeRefreshRequest = homeRefreshRequest,
+                        rootScope = selectedDestination.route,
                         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
                     )
                 } else {
@@ -411,6 +445,7 @@ internal fun TiebaPureApp(
                             destinationNavController = rootNavController,
                             onSelectRoot = navigateToRoot,
                             homeRefreshRequest = homeRefreshRequest,
+                        rootScope = selectedDestination.route,
                             modifier = Modifier.width(panes.list),
                         )
                         VerticalDivider(
@@ -423,6 +458,7 @@ internal fun TiebaPureApp(
                             navController = rootNavController,
                             onSelectRoot = navigateToRoot,
                             homeRefreshRequest = homeRefreshRequest,
+                        rootScope = selectedDestination.route,
                             modifier = Modifier.width(panes.detail),
                             rootDestinationsAsEmpty = true,
                         )
@@ -431,16 +467,8 @@ internal fun TiebaPureApp(
             }
         }
     }
-    sessionExpirationNotice?.let { notice ->
-        AlertDialog(
-            onDismissRequest = container.sessionExpiration::dismissNotice,
-            title = { Text("登录已失效") },
-            text = { Text(notice.message) },
-            confirmButton = {
-                TextButton(onClick = container.sessionExpiration::dismissNotice) { Text("知道了") }
-            },
-        )
-    }
+}
+
 }
 
 @Composable
@@ -450,21 +478,34 @@ private fun AppNavigationHost(
     navController: NavHostController,
     onSelectRoot: (RootDestination) -> Unit,
     homeRefreshRequest: Long,
+    rootScope: String,
     modifier: Modifier,
     destinationNavController: NavHostController = navController,
     startDestination: String = RootDestination.Home.route,
     rootDestinationsAsEmpty: Boolean = false,
 ) {
     val context = LocalContext.current
-    val account by container.account.collectAsStateWithLifecycle()
     val savedThreadEntries by container.savedThreads.entries.collectAsStateWithLifecycle(initialValue = emptyList())
-    val accountSessionKey = sessionViewModelKey(account)
+    val subscriptions by container.localLibrary.subscriptions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val followedUsers by container.localUsers.users.collectAsStateWithLifecycle(initialValue = emptyList())
+    val bookmarks by container.localLibrary.bookmarks.collectAsStateWithLifecycle(initialValue = emptyList())
+    val recentForumsFlow = remember(container) { container.featureRepositories.forumHub.recentForums() }
+    val recentForums by recentForumsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val blockedEntriesFlow = remember(container) { container.database.blocklistDao().observeAll() }
+    val blockedEntries by blockedEntriesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    var subscriptionBusy by remember { mutableStateOf(false) }
+    val accountSessionKey = "guest"
     val scope = rememberCoroutineScope()
+    val localSnackbar = remember { SnackbarHostState() }
+    var localNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(localNotice) {
+        localNotice?.let { localSnackbar.showSnackbar(it); localNotice = null }
+    }
     val versionName = remember(context) { appVersionName(context) }
     var message by rememberSaveable { mutableStateOf<String?>(null) }
     val settingsViewModel: SettingsViewModel = viewModel(
         key = "settings",
-        factory = SettingsViewModel.factory(container.settingsRepository, container.settingsAccountActions),
+        factory = SettingsViewModel.factory(container.settingsRepository),
     )
     val imageDownloader = remember(context.applicationContext) {
         SecureImageDownloadClient(context.applicationContext)
@@ -523,33 +564,47 @@ private fun AppNavigationHost(
         }
     }
 
-    val openComposer: (ContentSubmissionTarget) -> Unit = { target ->
-        val enabled = when (target.kind) {
-            ContentSubmissionKind.NewThread -> settings.postingEnabled
-            else -> settings.replyingEnabled
-        }
-        when {
-            account == null -> message = "请先登录贴吧账号。"
-            !enabled -> message = if (target.kind == ContentSubmissionKind.NewThread) {
-                "请先在设置中开启允许发帖。"
-            } else {
-                "请先在设置中开启允许回帖。"
+    val toggleLocalSubscription: (Forum) -> Unit = { forum ->
+        if (!subscriptionBusy) {
+            val subscribed = subscriptions.any { it.normalizedName == dev.infinityf4p.tiebapure.core.data.localForumKey(forum.name) }
+            subscriptionBusy = true
+            scope.launch {
+                try {
+                    if (subscribed) {
+                        container.localLibrary.unsubscribe(forum.name)
+                    } else {
+                        container.subscribe(forum)
+                    }
+                    localNotice = if (subscribed) "已取消本地订阅。" else "已加入本地订阅。"
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    localNotice = readableMessage(error)
+                } finally {
+                    subscriptionBusy = false
+                }
             }
-            else -> destinationNavController.navigate(composerRoute(target))
         }
     }
 
-    Box(modifier.background(MaterialTheme.colorScheme.background)) {
+    val exportMedia = rememberMediaFileExport { localNotice = it }
+    CompositionLocalProvider(dev.infinityf4p.tiebapure.core.media.LocalMediaFileSaveRequest provides exportMedia) {
+    ThreadSwipeNavigation(navController, rootScope, modifier) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         NavHost(
             navController = navController,
             startDestination = startDestination,
+            enterTransition = { androidx.compose.animation.EnterTransition.None },
+            exitTransition = { androidx.compose.animation.ExitTransition.None },
+            popEnterTransition = { androidx.compose.animation.EnterTransition.None },
+            popExitTransition = { androidx.compose.animation.ExitTransition.None },
             modifier = Modifier.fillMaxSize(),
         ) {
-            composable(Routes.DetailEmpty) {
+            readerComposable(Routes.DetailEmpty) {
                 ReaderStatePane(ReaderState.Empty("暂无选中内容"), Modifier.fillMaxSize())
             }
 
-            composable(RootDestination.Home.route) {
+            readerComposable(RootDestination.Home.route) {
                 if (rootDestinationsAsEmpty) {
                     EmptyDetailPane()
                 } else {
@@ -562,7 +617,10 @@ private fun AppNavigationHost(
                         programmaticRefreshRequest = homeRefreshRequest,
                         mediaLoadingPolicy = settings.reading.mediaLoading,
                         callbacks = HomeCallbacks(
-                            canLike = settings.likingEnabled,
+                            isSubscribed = { f -> subscriptions.any { it.normalizedName == dev.infinityf4p.tiebapure.core.data.localForumKey(f.name) } },
+                            onSubscribe = toggleLocalSubscription,
+                            canLike = false,
+                            onShare = { sharePublicLink(context, "https://tieba.baidu.com/p/${it.id}") },
                             onOpenSearch = { destinationNavController.navigate(Routes.Search) },
                         onOpenThread = {
                             container.featureRepositories.rememberThreadSummary(it)
@@ -583,88 +641,77 @@ private fun AppNavigationHost(
                                     .onFailure { message = readableMessage(it) }
                             }
                         },
-                        onToggleLike = { thread ->
-                            val current = account
-                            val firstPostId = thread.firstPostId
-                            when {
-                                !settings.likingEnabled -> message = "请先在设置中开启允许点赞。"
-                                current == null -> message = "登录后才能点赞。"
-                                firstPostId == null -> message = "暂时无法获取该帖的点赞信息。"
-                                else -> home.beginLikeMutation(thread.id)?.let { currentThread -> scope.launch {
-                                    val targetLiked = !currentThread.isLiked
-                                    runCatching {
-                                        container.mutationRepository.setPostLiked(
-                                            current,
-                                            thread.id,
-                                            firstPostId,
-                                            TiebaLikeObjectType.Thread,
-                                            targetLiked,
-                                        )
-                                    }.onSuccess { home.completeLikeMutation(thread.id, targetLiked) }
-                                        .onFailure {
-                                            val unknown = it.mutationOutcomeUnknownMessageOrNull()
-                                            if (unknown != null) home.markLikeOutcomeUnknown(thread.id, unknown)
-                                            else home.failLikeMutation(thread.id)
-                                            message = unknown ?: readableMessage(it)
-                                        }
-                                } }
-                            }
-                        },
                         onOpenMedia = openThreadMedia,
                         ),
                     )
                 }
             }
 
-            composable(RootDestination.Forums.route) {
-                if (rootDestinationsAsEmpty) {
-                    EmptyDetailPane()
-                } else {
-                    val hub: ForumHubViewModel = viewModel(
-                        key = "forum-hub-$accountSessionKey",
-                        factory = factory { ForumHubViewModel(container.featureRepositories.forumHub) },
+            readerComposable(RootDestination.Forums.route) {
+                if (rootDestinationsAsEmpty) EmptyDetailPane() else {
+                    val feed: SubscriptionFeedViewModel = viewModel(
+                        factory = factory { SubscriptionFeedViewModel(container.subscriptionFeed) },
                     )
-                    ForumHubRoute(
-                        viewModel = hub,
-                        onOpenForum = { forum ->
-                            destinationNavController.navigate(forumRoute(forum))
-                        },
-                    )
-                }
-            }
-
-            composable(RootDestination.Me.route) {
-                if (rootDestinationsAsEmpty) {
-                    EmptyDetailPane()
-                } else {
-                    val me: MeViewModel = viewModel(factory = factory { MeViewModel(container.accountFeatures.me) })
-                    MeRoute(
-                        viewModel = me,
-                        onLogin = { destinationNavController.navigate(Routes.Login) },
-                        onOpen = { destination ->
-                            when (destination) {
-                            AccountDestination.OwnProfile -> account?.let {
-                                destinationNavController.navigate(userRoute(it.toUserSummary()))
-                            } ?: run { message = "请先登录贴吧账号。" }
-                            AccountDestination.Messages -> destinationNavController.navigate(Routes.Messages)
-                            AccountDestination.FollowedUsers -> account?.let {
-                                destinationNavController.navigate(
-                                    relationshipRoute(it.toUserSummary(), UserRelationshipKind.Following),
-                                )
-                            } ?: run { message = "请先登录贴吧账号。" }
-                            AccountDestination.FollowedForums -> onSelectRoot(RootDestination.Forums)
-                            AccountDestination.FollowingUpdates -> destinationNavController.navigate(Routes.FollowingUpdates)
-                            AccountDestination.ThreadFavorites -> destinationNavController.navigate(Routes.Favorites)
-                            AccountDestination.BrowsingHistory -> destinationNavController.navigate(Routes.History)
-                            AccountDestination.Settings -> destinationNavController.navigate(Routes.Settings)
-                            AccountDestination.About -> destinationNavController.navigate(Routes.About)
-                            }
-                        },
+                    SubscriptionFeedScreen(
+                        viewModel = feed,
+                        mediaLoadingPolicy = settings.reading.mediaLoading,
+                        blockedEntries = blockedEntries,
+                        onBrowseForums = { onSelectRoot(RootDestination.Browse) },
+                        callbacks = HomeCallbacks(
+                            isSubscribed = { f -> subscriptions.any { it.normalizedName == dev.infinityf4p.tiebapure.core.data.localForumKey(f.name) } },
+                            onSubscribe = toggleLocalSubscription,
+                            canLike = false,
+                            onShare = { sharePublicLink(context, "https://tieba.baidu.com/p/${it.id}") },
+                            onOpenThread = {
+                                container.featureRepositories.rememberThreadSummary(it)
+                                destinationNavController.navigate(threadRoute(it.id))
+                            },
+                            onOpenComments = {
+                                container.featureRepositories.rememberThreadSummary(it)
+                                destinationNavController.navigate(threadRoute(it.id, initialDestination = ThreadInitialDestination.Replies))
+                            },
+                            onOpenForum = { destinationNavController.navigate(forumRoute(it)) },
+                            onOpenUser = { destinationNavController.navigate(userRoute(it)) },
+                            onBlockForum = { forum -> scope.launch {
+                                try { container.addBlockedForum(forum) }
+                                catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                                catch (error: Exception) { localNotice = readableMessage(error) }
+                            } },
+                            onOpenMedia = openThreadMedia,
+                        ),
                     )
                 }
             }
 
-            composable(
+            readerComposable(RootDestination.Browse.route) {
+                if (rootDestinationsAsEmpty) EmptyDetailPane() else LocalForumsRoute(
+                    repository = container.localLibrary,
+                    onOpenForum = { destinationNavController.navigate(forumRoute(it)) },
+                    onSearch = { destinationNavController.navigate("search?forumFirst=true") },
+                    recentForums = recentForums,
+                    onRemoveRecent = container.featureRepositories.forumHub::removeRecent,
+                    followedUsers = followedUsers.map { it.toUser() },
+                    onOpenUser = { destinationNavController.navigate(userRoute(it)) },
+                    onUnfollowUser = { id -> scope.launch {
+                        try { container.localUsers.unfollow(id) }
+                        catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                        catch (error: Exception) { localNotice = readableMessage(error) }
+                    } },
+                )
+            }
+
+            readerComposable(RootDestination.Local.route) {
+                if (rootDestinationsAsEmpty) EmptyDetailPane() else LocalBookmarksRoute(
+                    repository = container.localLibrary,
+                    offlineThreadIds = savedThreadEntries.map { it.threadId }.toSet(),
+                    onOpenThread = { destinationNavController.navigate(threadRoute(it)) },
+                    onOpenOfflineThread = { destinationNavController.navigate("saved-thread/$it") },
+                    onOpenOfflineLibrary = { destinationNavController.navigate(Routes.SavedThreads) },
+                    onOpenHistory = { destinationNavController.navigate(Routes.History) },
+                )
+            }
+
+            readerComposable(
                 route = Routes.SearchPattern,
                 arguments = listOf(
                     navArgument("query") {
@@ -672,6 +719,7 @@ private fun AppNavigationHost(
                         nullable = true
                         defaultValue = null
                     },
+                    navArgument("forumFirst") { type = NavType.BoolType; defaultValue = false },
                 ),
             ) { entry ->
                 val initialKeyword = Uri.decode(entry.arguments?.getString("query").orEmpty())
@@ -683,9 +731,13 @@ private fun AppNavigationHost(
                     container.featureRepositories::rememberThreadSummary,
                     settings.reading.mediaLoading,
                     openThreadMedia,
+                    initialForumFilter = entry.arguments?.getBoolean("forumFirst") == true,
+                    isLocallySubscribed = { forum -> subscriptions.any { it.normalizedName == dev.infinityf4p.tiebapure.core.data.localForumKey(forum.name) } },
+                    onToggleLocalSubscription = toggleLocalSubscription,
+                    localSubscriptionUpdating = subscriptionBusy,
                 )
             }
-            composable(Routes.ForumSearch) { entry ->
+            readerComposable(Routes.ForumSearch) { entry ->
                 val name = Uri.decode(entry.arguments?.getString("forumName").orEmpty()).removeSuffix("吧")
                 SearchPage(
                     navController,
@@ -695,10 +747,13 @@ private fun AppNavigationHost(
                     container.featureRepositories::rememberThreadSummary,
                     settings.reading.mediaLoading,
                     openThreadMedia,
+                    isLocallySubscribed = { forum -> subscriptions.any { it.normalizedName == dev.infinityf4p.tiebapure.core.data.localForumKey(forum.name) } },
+                    onToggleLocalSubscription = toggleLocalSubscription,
+                    localSubscriptionUpdating = subscriptionBusy,
                 )
             }
 
-            composable(Routes.Forum) { entry ->
+            readerComposable(Routes.Forum) { entry ->
                 val name = Uri.decode(entry.arguments?.getString("forumName").orEmpty()).removeSuffix("吧")
                 val forum = Forum(0, name, "${name}吧")
                 val forumViewModel: ForumThreadsViewModel = viewModel(
@@ -717,25 +772,19 @@ private fun AppNavigationHost(
                     viewModel = forumViewModel,
                     mediaLoadingPolicy = settings.reading.mediaLoading,
                     callbacks = ForumThreadsCallbacks(
+                        localSubscribed = subscriptions.any { it.normalizedName == dev.infinityf4p.tiebapure.core.data.localForumKey(name) },
+                        localSubscriptionUpdating = subscriptionBusy,
+                        onToggleLocalSubscription = toggleLocalSubscription,
                         capabilities = ForumThreadsCapabilities(
-                            canCreateThread = settings.postingEnabled,
+                            canCreateThread = false,
                         ),
-                        onBack = { navController.popBackStack() },
-                        onSearch = { navController.navigate("search/forum/${Uri.encode(it.name)}") },
-                        onCreateThread = { value ->
-                            openComposer(
-                                ContentSubmissionTarget(
-                                    kind = ContentSubmissionKind.NewThread,
-                                    forumId = value.id,
-                                    forumName = value.name.removeSuffix("吧"),
-                                ),
-                            )
-                        },
+                        onBack = LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit },
+                        onSearch = { destinationNavController.navigate("search/forum/${Uri.encode(it.name)}") },
                         onOpenThread = {
                             container.featureRepositories.rememberThreadSummary(it)
-                            navController.navigate(threadRoute(it.id))
+                            destinationNavController.navigate(threadRoute(it.id))
                         },
-                        onOpenUser = { navController.navigate(userRoute(it)) },
+                        onOpenUser = { destinationNavController.navigate(userRoute(it)) },
                         onBlockForum = { forum ->
                             scope.launch {
                                 runCatching { container.addBlockedForum(forum) }
@@ -747,8 +796,10 @@ private fun AppNavigationHost(
                 )
             }
 
-            composable(Routes.Thread) { entry ->
-                val threadId = entry.arguments?.getString("threadId")?.toLongOrNull() ?: return@composable
+            readerComposable(Routes.Thread) { entry ->
+                val threadId = entry.arguments?.getString("threadId")?.toLongOrNull() ?: return@readerComposable
+                var isBookmarkUpdating by remember(threadId) { mutableStateOf(false) }
+                val isBookmarked = bookmarks.any { it.threadId == threadId }
                 var isSavingThread by remember(threadId) { mutableStateOf(false) }
                 var showsSaveMode by remember(threadId) { mutableStateOf(false) }
                 var pendingSaveSource by remember(threadId) { mutableStateOf<SavedThreadSaveSource?>(null) }
@@ -765,25 +816,16 @@ private fun AppNavigationHost(
                     viewModelSessionKey = accountSessionKey,
                     repository = container.featureRepositories.thread,
                     capabilities = ThreadCapabilities(
-                        canReply = settings.replyingEnabled,
-                        canLike = settings.likingEnabled,
+                        canReply = false,
+                        canLike = false,
+                        canCollect = false,
                     ),
-                    onCollectionChanged = { collected ->
-                        navController.previousBackStackEntry
-                            ?.takeIf { it.destination.route == Routes.Favorites }
-                            ?.savedStateHandle
-                            ?.set(
-                                ThreadCollectionResultKey,
-                                threadCollectionResultValue(threadId, collected),
-                            )
-                    },
-                    onBack = { navController.popBackStack() },
-                    onForumClick = { navController.navigate(forumRoute(it)) },
-                    onReply = { reply ->
-                        val target = container.featureRepositories.contentSubmissionTarget(threadId, reply)
-                        if (target == null) message = "帖子信息尚未加载完整，请刷新后重试。" else openComposer(target)
-                    },
-                    onUserClick = { navController.navigate(userRoute(UserSummary(it, "", "", ""))) },
+                    onBack = LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit },
+                    onForumClick = { destinationNavController.navigate(forumRoute(it)) },
+                    isLocallySubscribed = { f -> subscriptions.any { it.normalizedName == dev.infinityf4p.tiebapure.core.data.localForumKey(f.name) } },
+                    onToggleLocalSubscription = toggleLocalSubscription,
+                    onReply = {},
+                    onUserClick = { destinationNavController.navigate(userRoute(UserSummary(it, "", "", ""))) },
                     onLinkClick = { openPublicLink(context, it) },
                     onShare = { sharePublicLink(context, it) },
                     onSave = { page, loadedPosts ->
@@ -792,6 +834,26 @@ private fun AppNavigationHost(
                             showsSaveMode = true
                         }
                     },
+                    onBookmark = { page ->
+                        if (!isBookmarkUpdating) {
+                            isBookmarkUpdating = true
+                            scope.launch {
+                                try {
+                                    if (isBookmarked) container.localLibrary.removeBookmark(threadId)
+                                    else container.localLibrary.bookmark(page.thread.copy(forumName = page.thread.forumName ?: page.forum.name))
+                                    localNotice = if (isBookmarked) "已取消本地收藏，离线内容仍保留。" else "已加入本地收藏。"
+                                } catch (error: kotlinx.coroutines.CancellationException) {
+                                    throw error
+                                } catch (error: Exception) {
+                                    message = readableMessage(error)
+                                } finally {
+                                    isBookmarkUpdating = false
+                                }
+                            }
+                        }
+                    },
+                    isBookmarked = isBookmarked,
+                    isBookmarkUpdating = isBookmarkUpdating,
                     isSaving = isSavingThread,
                     isSaved = isThreadSaved,
                     onDownloadImage = requestImageDownload,
@@ -822,158 +884,94 @@ private fun AppNavigationHost(
                 }
             }
 
-            composable(Routes.Login) {
-                val login: LoginViewModel = viewModel(factory = factory { LoginViewModel(container.accountFeatures.login) })
-                LoginRoute(
-                    viewModel = login,
-                    onLoggedIn = {
-                        if (!navController.popBackStack()) onSelectRoot(RootDestination.Me)
-                    },
-                    onError = { message = it },
-                )
-            }
-
-            composable(Routes.User) { entry ->
+            readerComposable(Routes.User) { entry ->
                 val user = userFrom(entry)
                 if (user == null) {
-                    MissingStatePage("用户信息无效，请返回后重试", navController::popBackStack)
+                    MissingStatePage("用户信息无效，请返回后重试", LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit })
                 } else {
                     val profile: UserProfileViewModel = viewModel(
                         key = "user-${user.id}-${user.name}-$accountSessionKey",
-                        factory = factory { UserProfileViewModel(user, container.accountFeatures.userProfile) },
+                        factory = factory { UserProfileViewModel(user, container.readerRepositories.userProfile) },
                     )
+                    val profileState by profile.uiState.collectAsStateWithLifecycle()
+                    val resolvedUser = profileState.profile?.user ?: user
+                    val locallyFollowed = followedUsers.any { it.userId == resolvedUser.id }
+                    val locallyBlocked = blockedEntries.any { it.kind == "User" && it.numericId == resolvedUser.id }
+                    var localUserBusy by remember { mutableStateOf(false) }
+                    val userActions: @Composable () -> Unit = {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        TextButton(enabled = !localUserBusy && profileState.profile != null && resolvedUser.id > 0,
+                            onClick = {
+                                localUserBusy = true
+                                scope.launch {
+                                    try {
+                                        if (locallyFollowed) container.localUsers.unfollow(resolvedUser.id)
+                                        else container.localUsers.follow(resolvedUser)
+                                    } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                                    catch (error: Exception) { localNotice = readableMessage(error) }
+                                    finally { localUserBusy = false }
+                                }
+                            }) { Text(if (locallyFollowed) "已本地关注" else "本地关注") }
+                        TextButton(enabled = !localUserBusy && resolvedUser.id > 0 && !locallyBlocked, onClick = {
+                            scope.launch {
+                                try {
+                                    container.settingsRepository.addBlocklistEntry(dev.infinityf4p.tiebapure.core.model.BlocklistEntry(
+                                        dev.infinityf4p.tiebapure.core.model.BlocklistEntryKind.User,
+                                        resolvedUser.resolvedDisplayName, resolvedUser.id))
+                                    localNotice = "已屏蔽该用户，可在设置中管理。"
+                                    profile.refresh()
+                                } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                                catch (error: Exception) { localNotice = readableMessage(error) }
+                            }
+                        }) { Text(if (locallyBlocked) "已屏蔽" else "屏蔽用户") }
+                    }
+                    }
                     UserProfileRoute(
+                        localActions = userActions,
                         viewModel = profile,
-                        onBack = { navController.popBackStack() },
-                        onEditProfile = {
-                            container.stageProfileEdit(it)
-                            navController.navigate(Routes.EditProfile)
-                        },
-                        onOpenRelationship = { following ->
-                            navController.navigate(
-                                relationshipRoute(
-                                    user,
-                                    if (following) UserRelationshipKind.Following else UserRelationshipKind.Followers,
-                                ),
-                            )
-                        },
-                        onOpenForum = { navController.navigate(forumRoute(it)) },
+                        onBack = LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit },
+                        readOnly = true,
+                        onOpenForum = { destinationNavController.navigate(forumRoute(it)) },
                         onOpenThread = {
                             container.featureRepositories.rememberThreadSummary(it)
-                            navController.navigate(threadRoute(it.id))
+                            destinationNavController.navigate(threadRoute(it.id))
                         },
                     )
+
                 }
             }
 
-            composable(Routes.Relationships) { entry ->
-                val user = userFrom(entry) ?: return@composable
-                val kind = entry.arguments?.getString("kind")?.let {
-                    runCatching { UserRelationshipKind.valueOf(it) }.getOrNull()
-                } ?: return@composable
-                val relationships: UserRelationshipsViewModel = viewModel(
-                    key = "relationships-${user.id}-${kind.name}-$accountSessionKey",
-                    factory = factory {
-                        UserRelationshipsViewModel(user, kind, container.accountFeatures.relationships)
-                    },
-                )
-                UserRelationshipsRoute(
-                    viewModel = relationships,
-                    title = if (kind == UserRelationshipKind.Following) "关注的用户" else "粉丝",
-                    onBack = { navController.popBackStack() },
-                    onOpenUser = { navController.navigate(userRoute(it)) },
-                )
-            }
-
-            composable(Routes.Messages) {
-                val messages: MessagesViewModel = viewModel(
-                    key = "messages-$accountSessionKey",
-                    factory = factory { MessagesViewModel(account, container.accountFeatures.messages) },
-                )
-                MessagesRoute(
-                    viewModel = messages,
-                    onBack = { navController.popBackStack() },
-                    onLogin = { navController.navigate(Routes.Login) },
-                    onOpenMessage = { item ->
-                        item.threadId?.let { navController.navigate(threadRoute(it, item.postId)) }
-                            ?: run { message = "这条消息没有可打开的帖子。" }
-                    },
-                )
-            }
-
-            composable(Routes.FollowingUpdates) {
-                val updates: FollowingUpdatesViewModel = viewModel(
-                    key = "following-updates-$accountSessionKey",
-                    factory = factory {
-                        FollowingUpdatesViewModel(account, container.accountFeatures.followingUpdates)
-                    },
-                )
-                FollowingUpdatesRoute(
-                    viewModel = updates,
-                    onBack = { navController.popBackStack() },
-                    onLogin = { navController.navigate(Routes.Login) },
-                    onOpenThread = { thread ->
-                        container.featureRepositories.rememberThreadSummary(thread)
-                        navController.navigate(threadRoute(thread.id))
-                    },
-                )
-            }
-
-            composable(Routes.Favorites) { entry ->
-                val favorites: ThreadFavoritesViewModel = viewModel(
-                    key = "favorites-$accountSessionKey",
-                    factory = factory { ThreadFavoritesViewModel(account, container.accountFeatures.threadFavorites) },
-                )
-                val collectionResultValue by entry.savedStateHandle
-                    .getStateFlow<LongArray?>(ThreadCollectionResultKey, null)
-                    .collectAsStateWithLifecycle()
-                LaunchedEffect(collectionResultValue) {
-                    collectionResultValue?.toThreadCollectionResult()?.let { result ->
-                        favorites.onCollectionChanged(result.threadId, result.collected)
-                    }
-                    if (collectionResultValue != null) {
-                        entry.savedStateHandle.set<LongArray?>(ThreadCollectionResultKey, null)
-                    }
-                }
-                ThreadFavoritesRoute(
-                    viewModel = favorites,
-                    onBack = { navController.popBackStack() },
-                    onLogin = { navController.navigate(Routes.Login) },
-                    onOpenFavorite = { navController.navigate(threadRoute(it.threadId, it.markedPostId)) },
-                )
-            }
-
-            composable(Routes.History) {
+            readerComposable(Routes.History) {
                 val history: BrowsingHistoryViewModel = viewModel(factory = factory {
-                    BrowsingHistoryViewModel(container.accountFeatures.browsingHistory)
+                    BrowsingHistoryViewModel(container.readerRepositories.browsingHistory)
                 })
                 BrowsingHistoryRoute(
                     viewModel = history,
-                    onBack = { navController.popBackStack() },
+                    onBack = LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit },
                     onOpenEntry = {
                         container.featureRepositories.rememberThreadSummary(it.thread)
-                        navController.navigate(threadRoute(it.thread.id))
+                        destinationNavController.navigate(threadRoute(it.thread.id))
                     },
                 )
             }
 
-            composable(Routes.SavedThreads) {
+            readerComposable(Routes.SavedThreads) {
                 SavedThreadsRoute(
                     repository = container.savedThreads,
-                    onBack = { navController.popBackStack() },
-                    onOpen = { navController.navigate("saved-thread/$it") },
+                    onBack = LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit },
+                    onOpen = { destinationNavController.navigate("saved-thread/$it") },
                 )
             }
 
-            composable(Routes.SavedThread) { entry ->
-                val threadId = entry.arguments?.getString("threadId")?.toLongOrNull() ?: return@composable
+            readerComposable(Routes.SavedThread) { entry ->
+                val threadId = entry.arguments?.getString("threadId")?.toLongOrNull() ?: return@readerComposable
                 SavedThreadDetailRoute(
                     threadId = threadId,
                     repository = container.savedThreads,
                     readingPreferences = settings.reading,
-                    onBack = { navController.popBackStack() },
-                    onForumClick = { navController.navigate(forumRoute(it)) },
-                    onUserClick = { navController.navigate(userRoute(UserSummary(it, "", "", ""))) },
+                    onBack = LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit },
+                    onForumClick = { destinationNavController.navigate(forumRoute(it)) },
+                    onUserClick = { destinationNavController.navigate(userRoute(UserSummary(it, "", "", ""))) },
                     onLinkClick = { openPublicLink(context, it) },
                     onShare = { sharePublicLink(context, "https://tieba.baidu.com/p/$threadId") },
                     onDownloadImage = requestImageDownload,
@@ -981,53 +979,48 @@ private fun AppNavigationHost(
                 )
             }
 
-            composable(Routes.EditProfile) {
-                val pending = container.profilePendingEdit
-                val ownsPendingProfile = account?.uid?.toLongOrNull() == pending?.user?.id
-                if (pending == null || !ownsPendingProfile) {
-                    MissingStatePage("需要重新进入个人主页后再编辑资料", navController::popBackStack)
-                } else {
-                    val edit: EditProfileViewModel = viewModel(
-                        key = "edit-profile-${pending.user.id}-$accountSessionKey",
-                        factory = factory { EditProfileViewModel(pending, container.accountFeatures.profileEdit) },
-                    )
-                    EditProfileRoute(
-                        viewModel = edit,
-                        onBack = { navController.popBackStack() },
-                        onSaved = {
-                            container.stageProfileEdit(null)
-                            navController.popBackStack()
-                        },
-                    )
-                }
-            }
-
-            composable(Routes.Settings) {
-                BackPage("设置", navController::popBackStack) {
+            readerComposable(Routes.Settings) {
+                if (rootDestinationsAsEmpty) EmptyDetailPane() else BackPage("设置") {
                     SettingsRoute(
                         viewModel = settingsViewModel,
-                        host = SettingsHostState(account, versionName),
+                        host = SettingsHostState(versionName = versionName),
                         onOpen = { destination ->
-                            navController.navigate(
+                            destinationNavController.navigate(
                                 when (destination) {
                                     SettingsDestination.Reading -> Routes.Reading
                                     SettingsDestination.SavedThreads -> Routes.SavedThreads
                                     SettingsDestination.Blocklist -> Routes.Blocklist
                                     SettingsDestination.About -> Routes.About
+                                    SettingsDestination.Storage -> Routes.Storage
                                 },
                             )
                         },
                     )
                 }
             }
-            composable(Routes.Reading) {
-                BackPage("阅读设置", navController::popBackStack) { ReadingSettingsRoute(settingsViewModel) }
+            readerComposable(Routes.Storage) {
+                BackPage("存储与缓存", LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit }) {
+                    StorageSettingsScreen(container, onOpenOffline = { destinationNavController.navigate(Routes.SavedThreads) })
+                }
             }
-            composable(Routes.Blocklist) {
-                BackPage("屏蔽设置", navController::popBackStack) { BlocklistSettingsRoute(settingsViewModel) }
+            readerComposable(Routes.Reading) {
+                BackPage("阅读设置", LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit }) {
+                    Column {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("帖子顶栏跟随贴吧配色", Modifier.weight(1f))
+                            androidx.compose.material3.Switch(settings.communityColors, { value -> scope.launch {
+                                runCatching { container.settings.setCommunityColors(value) }.onFailure { message = readableMessage(it) }
+                            } })
+                        }
+                        ReadingSettingsRoute(settingsViewModel)
+                    }
+                }
             }
-            composable(Routes.About) {
-                BackPage("关于", navController::popBackStack) {
+            readerComposable(Routes.Blocklist) {
+                BackPage("屏蔽设置", LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit }) { BlocklistSettingsRoute(settingsViewModel) }
+            }
+            readerComposable(Routes.About) {
+                BackPage("关于", LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit }) {
                     AboutSettingsScreen(
                         info = SettingsAboutInfo(versionName),
                         onOpenUrl = { openPublicLink(context, it) },
@@ -1035,50 +1028,9 @@ private fun AppNavigationHost(
                 }
             }
 
-            composable(Routes.Composer) { entry ->
-                val target = composerTargetFrom(entry)
-                val current = account
-                when {
-                    target == null -> MissingStatePage("发布目标无效，请返回后重试", navController::popBackStack)
-                    current == null -> MissingStatePage("请先登录贴吧账号", navController::popBackStack)
-                    else -> {
-                        val composer: ComposerViewModel = viewModel(
-                            key = "composer-${composerRoute(target)}-$accountSessionKey",
-                            factory = ComposerViewModel.factory(
-                                accountId = current.id,
-                                target = target,
-                                repository = container.composerRepository,
-                                riskAcknowledged = settings.submissionRiskAcknowledged,
-                            ),
-                        )
-                        ContentComposerRoute(
-                            viewModel = composer,
-                            submissionCapability = ComposerSubmissionCapability.fromSettings(
-                                kind = target.kind,
-                                enabled = contentSubmissionEnabled(
-                                    target.kind,
-                                    settings.postingEnabled,
-                                    settings.replyingEnabled,
-                                ),
-                            ),
-                            onCancel = { navController.popBackStack() },
-                            onAcknowledgeRisk = {
-                                scope.launch { container.settingsRepository.acknowledgeSubmissionRisk() }
-                            },
-                            onSent = { receipt ->
-                                navController.popBackStack()
-                                if (target.kind == ContentSubmissionKind.NewThread) {
-                                    navController.navigate(threadRoute(receipt.threadId))
-                                } else {
-                                    message = "已提交，请刷新帖子确认显示结果。"
-                                }
-                            },
-                        )
-                    }
-                }
-            }
         }
 
+        SnackbarHost(localSnackbar, Modifier.align(Alignment.BottomCenter).padding(16.dp))
         message?.let { currentMessage ->
             AlertDialog(
                 onDismissRequest = { message = null },
@@ -1096,6 +1048,8 @@ private fun AppNavigationHost(
             )
         }
     }
+    }
+    }
 }
 
 @Composable
@@ -1107,16 +1061,24 @@ private fun SearchPage(
     rememberThreadSummary: (dev.infinityf4p.tiebapure.core.model.ThreadSummary) -> Unit,
     mediaLoadingPolicy: dev.infinityf4p.tiebapure.core.model.ReaderMediaLoadingPolicy,
     onOpenMedia: (dev.infinityf4p.tiebapure.core.model.ThreadSummary, Int) -> Unit,
+    isLocallySubscribed: (Forum) -> Boolean = { false },
+    onToggleLocalSubscription: ((Forum) -> Unit)? = null,
+    localSubscriptionUpdating: Boolean = false,
+    initialForumFilter: Boolean = false,
 ) {
     val search: SearchViewModel = viewModel(
-        key = "search-${(scope as? SearchScope.ForumOnly)?.forum?.name.orEmpty()}-$initialKeyword",
-        factory = factory { SearchViewModel(repository, scope, initialKeyword) },
+        key = "search-${(scope as? SearchScope.ForumOnly)?.forum?.name.orEmpty()}-$initialKeyword-$initialForumFilter",
+        factory = factory { SearchViewModel(repository, scope, initialKeyword,
+            initialFilter = if (initialForumFilter) dev.infinityf4p.tiebapure.feature.search.SearchFilter.Forums else null) },
     )
     SearchRoute(
         viewModel = search,
         mediaLoadingPolicy = mediaLoadingPolicy,
         callbacks = SearchCallbacks(
-            onBack = { navController.popBackStack() },
+            isLocallySubscribed = isLocallySubscribed,
+            onToggleLocalSubscription = onToggleLocalSubscription,
+            localSubscriptionUpdating = localSubscriptionUpdating,
+            onBack = LocalThreadSwipeBack.current ?: { navController.popBackStack(); Unit },
             onOpenThread = {
                 dispatchSearchThreadNavigation(it, rememberThreadSummary) { route ->
                     navController.navigate(route)
@@ -1130,19 +1092,9 @@ private fun SearchPage(
 }
 
 @Composable
-private fun BackPage(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+private fun BackPage(title: String, onBack: (() -> Unit)? = null, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回") }
-            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        dev.infinityf4p.tiebapure.core.designsystem.ReaderPageHeader(title, onBack = onBack)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Box(Modifier.weight(1f)) { content() }
     }
@@ -1156,18 +1108,28 @@ private fun MissingStatePage(message: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun RootNavigationBar(selected: RootDestination, onSelected: (RootDestination) -> Unit) {
-    NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp,
-    ) {
-        for (destination in RootDestination.entries) {
-            NavigationBarItem(
-                selected = selected == destination,
-                onClick = { onSelected(destination) },
-                icon = { Icon(rootIcon(destination), contentDescription = null) },
-                label = { Text(destination.label) },
-            )
+internal fun RootNavigationBar(selected: RootDestination, onSelected: (RootDestination) -> Unit) {
+    androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+        Column {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth()
+                .windowInsetsPadding(androidx.compose.material3.NavigationBarDefaults.windowInsets)
+                .selectableGroup()) {
+                for (destination in RootDestination.entries) {
+                    val active = selected == destination
+                    val color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(Modifier.weight(1f).heightIn(min = 64.dp)
+                        .selectable(selected = active, role = androidx.compose.ui.semantics.Role.Tab,
+                            onClick = { onSelected(destination) })
+                        .padding(horizontal = 2.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
+                        Icon(rootIcon(destination, active), null, Modifier.size(24.dp), tint = color)
+                        Text(destination.label, style = MaterialTheme.typography.labelSmall,
+                            color = color, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                }
+            }
         }
     }
 }
@@ -1187,7 +1149,7 @@ private fun RootNavigationRail(
             NavigationRailItem(
                 selected = selected == destination,
                 onClick = { onSelected(destination) },
-                icon = { Icon(rootIcon(destination), contentDescription = null) },
+                icon = { Icon(rootIcon(destination, selected == destination), contentDescription = null, tint = if (selected == destination) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant) },
                 label = { Text(destination.label) },
             )
         }
@@ -1213,10 +1175,18 @@ private fun EmptyDetailPane() {
     ReaderStatePane(ReaderState.Empty("暂无选中内容"), Modifier.fillMaxSize())
 }
 
-private fun rootIcon(destination: RootDestination) = when (destination) {
+private fun rootIcon(destination: RootDestination, selected: Boolean = false) = if (selected) when (destination) {
+    RootDestination.Home -> Icons.Filled.Home
+    RootDestination.Forums -> Icons.Filled.DynamicFeed
+    RootDestination.Browse -> Icons.Filled.GridView
+    RootDestination.Local -> Icons.Filled.Bookmark
+    RootDestination.Settings -> Icons.Filled.Settings
+} else when (destination) {
     RootDestination.Home -> Icons.Outlined.Home
-    RootDestination.Forums -> Icons.Outlined.GridView
-    RootDestination.Me -> Icons.Outlined.Person
+    RootDestination.Forums -> Icons.Outlined.DynamicFeed
+    RootDestination.Browse -> Icons.Outlined.GridView
+    RootDestination.Local -> Icons.Outlined.BookmarkBorder
+    RootDestination.Settings -> Icons.Outlined.Settings
 }
 
 private fun forumRoute(forum: Forum): String =

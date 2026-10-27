@@ -3,6 +3,7 @@ package dev.infinityf4p.tiebapure.feature.home
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -17,6 +18,10 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.test.filters.SdkSuppress
 import androidx.compose.ui.unit.dp
 import dev.infinityf4p.tiebapure.core.designsystem.TiebaPureTheme
 import dev.infinityf4p.tiebapure.core.model.ContentBlock
@@ -29,6 +34,41 @@ import org.junit.Rule
 import org.junit.Test
 
 class HomeScreenTest {
+    @Test
+    fun singleImageUsesUpstreamMaximumWidth() {
+        composeRule.setContent {
+            TiebaPureTheme {
+                HomeScreen(HomeUiState(threads = listOf(mediaThread(101, "限宽图片"))), HomeCallbacks(), {}, {})
+            }
+        }
+        val bounds = composeRule.onNodeWithTag("home-feed-list").getUnclippedBoundsInRoot()
+        val available = bounds.right - bounds.left - 32.dp
+        composeRule.onNodeWithTag("thread-media-preview-0", useUnmergedTree = true)
+            .performScrollTo().assertWidthIsEqualTo(minOf(320.dp, available))
+    }
+
+    @Test @SdkSuppress(minSdkVersion = 26)
+    fun lightHeaderKeepsItsColorAfterCollapseAndReveal() = assertHeaderColorStable(false)
+
+    @Test @SdkSuppress(minSdkVersion = 26)
+    fun darkHeaderKeepsItsColorAfterCollapseAndReveal() = assertHeaderColorStable(true)
+
+    private fun assertHeaderColorStable(dark: Boolean) {
+        val threads = (1L..25L).map { id -> ThreadSummary(id = id, title = "帖子$id",
+            author = UserSummary(1, "u", "作者", ""), forumName = "测试", replyCount = 1,
+            viewCount = 1, blocks = listOf(ContentBlock.Text("用于验证顶部栏滚动颜色。"))) }
+        composeRule.setContent {
+            TiebaPureTheme(darkTheme = dark) {
+                HomeScreen(HomeUiState(threads = threads, hasMore = false), HomeCallbacks(), {}, {})
+            }
+        }
+        val before = composeRule.onNodeWithTag("home-top-bar").captureToImage().toPixelMap()[1, 1]
+        composeRule.onNodeWithTag("home-feed").performTouchInput { swipeUp() }
+        composeRule.onNodeWithTag("home-feed").performTouchInput { swipeDown(startY = height * .35f, endY = height * .65f) }
+        composeRule.onNodeWithTag("home-top-bar").assertIsDisplayed()
+        val after = composeRule.onNodeWithTag("home-top-bar").captureToImage().toPixelMap()[1, 1]
+        assertEquals(before, after)
+    }
     @get:Rule val composeRule = createComposeRule()
 
     @Test
@@ -118,7 +158,7 @@ class HomeScreenTest {
     }
 
     @Test
-    fun unknownLikeOutcomeDisablesActionAndExplainsState() {
+    fun obsoleteMutationStateCannotMakeReadOnlyCountsClickable() {
         val thread = mediaThread(id = 22, title = "点赞状态主题").copy(
             firstPostId = 220u,
             likeCount = 2,
@@ -137,10 +177,9 @@ class HomeScreenTest {
         }
 
         composeRule.onNodeWithText("点赞状态主题").performScrollTo()
-        composeRule.onNode(hasStateDescription("点赞结果待确认"), useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("点赞，当前2个赞", useUnmergedTree = true)
+        composeRule.onNodeWithContentDescription("点赞数，当前2个赞", useUnmergedTree = true)
             .assertIsDisplayed()
-            .assertIsNotEnabled()
+            .assertHasNoClickAction()
         composeRule.onNodeWithTag("home-like-22", useUnmergedTree = true)
             .performScrollTo()
     }
@@ -164,7 +203,7 @@ class HomeScreenTest {
         }
 
         composeRule.onNodeWithText("只读点赞主题").performScrollTo()
-        composeRule.onNodeWithContentDescription("点赞，当前8个赞", useUnmergedTree = true)
+        composeRule.onNodeWithContentDescription("点赞数，当前8个赞", useUnmergedTree = true)
             .assertIsDisplayed()
             .assertHasNoClickAction()
         composeRule.runOnIdle { assertEquals(0, toggleCalls) }

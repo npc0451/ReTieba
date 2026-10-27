@@ -22,6 +22,27 @@ import kotlin.test.assertTrue
 
 class UserProfileViewModelTest {
     @Test
+    fun publicForumsPaginateAndFailedPageCanBeRetried() = withModelScope { scope ->
+        val repository = ControllableUserProfileRepository()
+        val viewModel = UserProfileViewModel(targetUser, repository, scope)
+        repository.profileCalls.single().result.complete(profile())
+        repository.threadCalls.single().result.complete(threadsPage())
+        viewModel.selectTab(UserProfileTab.Forums)
+        val forum = dev.infinityf4p.tiebapure.core.model.Forum(1, "test", "test吧")
+        repository.forumCalls.single().second.complete(dev.infinityf4p.tiebapure.core.model.UserForumsPage(listOf(forum), 1, true))
+        viewModel.loadMoreForums()
+        repository.forumCalls.last().second.completeExceptionally(java.io.IOException("restricted"))
+        assertEquals(2, viewModel.uiState.value.nextForumPage)
+        assertEquals("restricted", viewModel.uiState.value.forumError)
+        assertEquals(listOf(forum), viewModel.uiState.value.profile?.followedForums)
+        viewModel.loadMoreForums()
+        assertEquals(listOf(1, 2, 2), repository.forumCalls.map { it.first })
+        repository.forumCalls.last().second.complete(dev.infinityf4p.tiebapure.core.model.UserForumsPage(listOf(forum), 2, true))
+        assertEquals(1, viewModel.uiState.value.profile?.followedForums?.size)
+        assertFalse(viewModel.uiState.value.hasMoreForums)
+    }
+
+    @Test
     fun constructionStartsInitialRequest() = withModelScope { scope ->
         assertFalse(UserProfileUiState().isInitialLoading)
         val repository = ControllableUserProfileRepository()
@@ -265,6 +286,13 @@ class UserRelationshipsViewModelTest {
 }
 
 private class ControllableUserProfileRepository : UserProfileRepository {
+    val forumCalls = mutableListOf<Pair<Int, CompletableDeferred<dev.infinityf4p.tiebapure.core.model.UserForumsPage>>>()
+    override suspend fun loadForums(user: UserSummary, page: Int): dev.infinityf4p.tiebapure.core.model.UserForumsPage {
+        val result = CompletableDeferred<dev.infinityf4p.tiebapure.core.model.UserForumsPage>()
+        forumCalls += page to result
+        return result.await()
+    }
+
     data class ProfileCall(
         val user: UserSummary,
         val result: CompletableDeferred<UserProfile> = CompletableDeferred(),

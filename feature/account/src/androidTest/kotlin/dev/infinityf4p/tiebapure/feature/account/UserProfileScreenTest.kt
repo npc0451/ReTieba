@@ -21,6 +21,17 @@ class UserProfileScreenTest {
     @get:Rule val composeRule = createComposeRule()
 
     @Test
+    fun readOnlyProfileHidesWritesEvenForStaleOwnProfileMetadata() {
+        composeRule.setContent {
+            TiebaPureTheme {
+                UserProfileScreen(state = profileState(true), onBack = {}, readOnly = true)
+            }
+        }
+        composeRule.onNodeWithText("编辑资料").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("删除帖子").assertDoesNotExist()
+    }
+
+    @Test
     fun loadedProfileKeepsThreadLoadingStateUntilThreadsResolve() {
         composeRule.setContent {
             TiebaPureTheme {

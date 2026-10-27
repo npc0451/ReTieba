@@ -38,38 +38,39 @@ class ExternalNavigationPolicyTest {
     fun parsesReadOnlyCustomSchemeDestinations() {
         assertEquals(
             ExternalNavigationDestination.Thread(9001),
-            view("tiebapure://thread/9001"),
+            view("tiebareaderdev://thread/9001"),
         )
         assertEquals(
             ExternalNavigationDestination.Forum("摄影"),
-            view("tiebapure://forum/%E6%91%84%E5%BD%B1%E5%90%A7"),
+            view("tiebareaderdev://forum/%E6%91%84%E5%BD%B1%E5%90%A7"),
         )
         assertEquals(
             ExternalNavigationDestination.Search("相机 guide"),
-            view("tiebapure://search?query=%E7%9B%B8%E6%9C%BA+guide"),
+            view("tiebareaderdev://search?query=%E7%9B%B8%E6%9C%BA+guide"),
         )
         assertEquals(
             ExternalNavigationDestination.Search("Compose+Android"),
-            view("tiebapure://search/Compose+Android"),
+            view("tiebareaderdev://search/Compose+Android"),
         )
-        assertEquals(ExternalNavigationDestination.Search(null), view("tiebapure://search"))
+        assertEquals(ExternalNavigationDestination.Search(null), view("tiebareaderdev://search"))
     }
 
     @Test
     fun rejectsMalformedOrPrivilegedCustomDestinations() {
         listOf(
-            "tiebapure://user/thread/1",
-            "tiebapure://compose/thread/1",
-            "tiebapure://user@thread/1",
-            "tiebapure://thread/0",
-            "tiebapure://thread/9223372036854775808",
-            "tiebapure://thread/1?next=2",
-            "tiebapure://forum/",
-            "tiebapure://forum/%2Fhidden",
-            "tiebapure://forum/%00hidden",
-            "tiebapure://search?unknown=value",
-            "tiebapure://search?q=one&query=two",
-            "tiebapure://search?q=value#fragment",
+            "tiebapure://thread/42",
+            "tiebareaderdev://user/thread/1",
+            "tiebareaderdev://compose/thread/1",
+            "tiebareaderdev://user@thread/1",
+            "tiebareaderdev://thread/0",
+            "tiebareaderdev://thread/9223372036854775808",
+            "tiebareaderdev://thread/1?next=2",
+            "tiebareaderdev://forum/",
+            "tiebareaderdev://forum/%2Fhidden",
+            "tiebareaderdev://forum/%00hidden",
+            "tiebareaderdev://search?unknown=value",
+            "tiebareaderdev://search?q=one&query=two",
+            "tiebareaderdev://search?q=value#fragment",
         ).forEach { value -> assertNull(value, view(value)) }
     }
 

@@ -10,6 +10,14 @@ import java.util.TimeZone
 import java.text.SimpleDateFormat
 
 class ThreadFormattingTest {
+    @Test fun commentInsetPreservesWidthOnSmallPanelsAndLargeFonts() {
+        assertEquals(48, commentBodyInsetDp(390f, 1f))
+        assertEquals(48, commentBodyInsetDp(360f, 1.29f))
+        assertEquals(24, commentBodyInsetDp(320f, 1f))
+        assertEquals(24, commentBodyInsetDp(390f, 1.3f))
+        assertEquals(24, commentBodyInsetDp(920f, 2f))
+    }
+
     @Test
     fun shareUrlUsesOfficialTiebaThreadAddress() {
         assertEquals("https://tieba.baidu.com/p/7", buildThreadShareUrl(7))
@@ -26,7 +34,7 @@ class ThreadFormattingTest {
     }
 
     @Test
-    fun metadataPlacementMatchesIosVerticalRhythm() {
+    fun metadataPlacementUsesCompactCommentRhythm() {
         assertEquals(
             ThreadPostMetadataPlacement.StandaloneReply,
             threadPostMetadataPlacement(isMainPost = false, hasPreviewSubposts = false),
@@ -35,10 +43,10 @@ class ThreadFormattingTest {
             ThreadPostMetadataPlacement.BeforeSubpostPreview,
             threadPostMetadataPlacement(isMainPost = false, hasPreviewSubposts = true),
         )
-        assertEquals(6, ThreadPostMetadataPlacement.StandaloneReply.topSpacing)
-        assertEquals(6, ThreadPostMetadataPlacement.BeforeSubpostPreview.topSpacing)
-        assertEquals(6, ThreadPostMetadataPlacement.StandaloneReply.cardBottomPadding)
-        assertEquals(6, ThreadPostMetadataPlacement.BeforeSubpostPreview.bottomSpacing)
+        assertEquals(0, ThreadPostMetadataPlacement.StandaloneReply.topSpacing)
+        assertEquals(0, ThreadPostMetadataPlacement.BeforeSubpostPreview.topSpacing)
+        assertEquals(4, ThreadPostMetadataPlacement.StandaloneReply.cardBottomPadding)
+        assertEquals(0, ThreadPostMetadataPlacement.BeforeSubpostPreview.bottomSpacing)
     }
 
     @Test
@@ -52,8 +60,6 @@ class ThreadFormattingTest {
         assertEquals(48f, replyFilterControlHeight(normal))
         assertEquals(48f, replyFilterControlHeight(enlarged))
         assertEquals(48f, replyFilterControlHeight(ReaderScaledTextMetrics(28f, 36f)))
-        assertEquals(false, replyFiltersUseStackedLayout(360f, 1f))
-        assertEquals(true, replyFiltersUseStackedLayout(320f, 1.2f))
     }
 
     @Test
@@ -74,8 +80,10 @@ class ThreadFormattingTest {
 
     @Test
     fun levelBadgeRemovesLineBreaks() {
-        assertEquals("Lv.4", userLevelBadgeText(4, null))
+        assertNull(userLevelBadgeText(4, null))
+        assertNull(userLevelBadgeText(4, "  \n "))
         assertEquals("4 F4", userLevelBadgeText(4, " F\n4 "))
+        assertEquals("真实吧内称号", userLevelBadgeText(null, "真实吧内称号"))
     }
 
     @Test

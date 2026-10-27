@@ -14,10 +14,11 @@ value class ReaderFontFamily private constructor(val rawValue: String) {
 
     companion object {
         val System = ReaderFontFamily("system")
+        val Plex = ReaderFontFamily("plex")
         val Serif = ReaderFontFamily("serif")
         val Rounded = ReaderFontFamily("rounded")
         val Monospace = ReaderFontFamily("monospace")
-        val builtIn = listOf(System, Serif, Rounded, Monospace)
+        val builtIn = listOf(System, Plex, Serif, Rounded, Monospace)
 
         private const val IMPORTED_PREFIX = "imported:"
         private val digestPattern = Regex("[0-9a-f]{64}")

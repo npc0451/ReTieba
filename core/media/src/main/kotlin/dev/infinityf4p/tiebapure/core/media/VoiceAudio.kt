@@ -2,6 +2,7 @@ package dev.infinityf4p.tiebapure.core.media
 
 import android.content.Context
 import android.net.Uri
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -114,7 +115,7 @@ class SecureVoiceAudioDownloadClient internal constructor(
     client: OkHttpClient,
     maximumBytes: Long,
 ) {
-    constructor(context: Context) : this(context, OkHttpClient(), MAXIMUM_AUDIO_BYTES)
+    constructor(context: Context) : this(context, defaultMediaHttpClient, MAXIMUM_AUDIO_BYTES)
 
     private val downloader = SecureMediaDownloader(
         directory = File(context.cacheDir, "voice-playback"),
@@ -472,7 +473,10 @@ fun VoicePlaybackControl(
         VoicePlaybackPhase.Idle -> "播放语音"
     }
 
+    val saveFile = LocalMediaFileSaveRequest.current
     Surface(
+        modifier = modifier.combinedClickable(
+        onLongClick = saveFile?.let { save -> { save(dev.infinityf4p.tiebapure.core.model.ContentBlock.Voice(voice)) } },
         onClick = {
             when (presentation.action) {
                 VoicePlaybackAction.Toggle -> coordinator.toggle(voice)
@@ -480,8 +484,7 @@ fun VoicePlaybackControl(
                 VoicePlaybackAction.None -> Unit
             }
         },
-        enabled = presentation.action != VoicePlaybackAction.None,
-        modifier = modifier
+        enabled = presentation.action != VoicePlaybackAction.None)
             .widthIn(min = 152.dp, max = 280.dp)
             .heightIn(min = 48.dp)
             .semantics {

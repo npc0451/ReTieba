@@ -6,12 +6,16 @@ import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.unit.dp
 import dev.infinityf4p.tiebapure.core.designsystem.TiebaPureTheme
 import dev.infinityf4p.tiebapure.core.model.ContentBlock
@@ -26,7 +30,49 @@ import org.junit.Rule
 import org.junit.Test
 
 class ThreadScreenTest {
+    @Test fun mainPostKeepsCommentSectionBoundary() {
+        composeRule.setContent {
+            TiebaPureTheme { TestThreadScreen(threadState(posts = listOf(replyPost(2u, 2)))) }
+        }
+        composeRule.onNodeWithTag("thread-main-comments-divider")
+            .performScrollTo().assertHeightIsEqualTo(6.dp)
+    }
+
     @get:Rule val composeRule = createComposeRule()
+
+    @Test
+    fun changingRepliesRetainsContentAndShowsInlineProgress() {
+        val state = threadState(posts = listOf(replyPost(2u, 2))).copy(
+            sort = dev.infinityf4p.tiebapure.core.model.ThreadReplySort.Descending,
+            isChangingReplies = true,
+        )
+        composeRule.setContent { TiebaPureTheme { TestThreadScreen(state) } }
+        composeRule.onNodeWithText("测试帖子").assertIsDisplayed()
+        composeRule.onNodeWithTag("thread-reply-transition").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("thread-initial-loading").assertDoesNotExist()
+    }
+
+    @Test
+    fun replyHasIndependentCollapseAndExpandControl() {
+        val post = replyPost(2u, 2).copy(blocks = listOf(ContentBlock.Text("可折叠回复正文")))
+        composeRule.setContent { TiebaPureTheme { TestThreadScreen(threadState(posts = listOf(post))) } }
+        composeRule.onNodeWithTag("thread-collapse-2").performScrollTo().performClick()
+        composeRule.onNodeWithText("可折叠回复正文").assertDoesNotExist()
+        composeRule.onNodeWithTag("thread-collapse-2").performClick()
+        composeRule.onNodeWithText("可折叠回复正文").assertExists()
+    }
+
+    @Test
+    fun restoredScreenDoesNotRepeatAnAlreadyCommittedFilterScroll() {
+        val replies = (2..21).map { floor -> replyPost(floor.toULong(), floor).copy(
+            blocks = listOf(ContentBlock.Text("回复内容$floor"))) }
+        val restoration = StateRestorationTester(composeRule)
+        restoration.setContent { TiebaPureTheme { TestThreadScreen(threadState(replies).copy(replyChangeVersion = 1)) } }
+        composeRule.onNodeWithTag("thread-reply-list").performScrollToNode(hasText("回复内容21"))
+        composeRule.onNodeWithText("回复内容21").assertIsDisplayed()
+        restoration.emulateSavedInstanceStateRestore()
+        composeRule.onNodeWithText("回复内容21").assertIsDisplayed()
+    }
 
     @Test
     fun disabledCapabilitiesRemoveWriteEntrancesButKeepReadOnlyMetadata() {
@@ -83,10 +129,9 @@ class ThreadScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("thread-forum-title")
-            .assertIsDisplayed()
-            .assertHeightIsEqualTo(48.dp)
-            .performClick()
+        composeRule.onNodeWithText(state.page!!.forum.displayName).assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("thread-reply-list").performScrollToIndex(1)
+        composeRule.onNodeWithTag("thread-forum-title").assertIsDisplayed()
 
         composeRule.runOnIdle { assertEquals(state.page?.forum, selectedForum) }
     }
@@ -108,6 +153,7 @@ class ThreadScreenTest {
             }
         }
 
+        composeRule.onNodeWithTag("thread-more-actions").performClick()
         composeRule.onNodeWithTag("thread-share-action")
             .assertIsDisplayed()
             .performClick()
@@ -116,7 +162,7 @@ class ThreadScreenTest {
     }
 
     @Test
-    fun localSaveActionUsesDedicatedToolbarControl() {
+    fun localSaveActionIsInToolbarMenu() {
         var saveCalls = 0
         composeRule.setContent {
             TiebaPureTheme {
@@ -127,6 +173,7 @@ class ThreadScreenTest {
             }
         }
 
+        composeRule.onNodeWithTag("thread-more-actions").performClick()
         composeRule.onNodeWithTag("thread-save-action")
             .assertIsDisplayed()
             .performClick()
@@ -190,6 +237,25 @@ class ThreadScreenTest {
     }
 
     @Test
+    fun fullyShownPreviewKeepsReplyEntryBelowText() {
+        val parent = replyPost(id = 2uL, floor = 2,
+            previewSubposts = listOf(subpost(21uL)), subpostCount = 1)
+        composeRule.setContent {
+            TiebaPureTheme { TestThreadScreen(state = threadState(posts = listOf(parent))) }
+        }
+        val action = composeRule.onNodeWithTag("thread-subpost-open-all", useUnmergedTree = true)
+            .performScrollTo().assertHeightIsEqualTo(48.dp).fetchSemanticsNode().boundsInRoot
+        val text = composeRule.onNodeWithTag("thread-preview-text-21", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue(action.top >= text.bottom)
+        val openText = composeRule.onNodeWithText("查看全部1条回复", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals(text.left, openText.left, 0.5f)
+
+        composeRule.onNodeWithText("查看全部1条回复").assertIsDisplayed()
+    }
+
+    @Test
     fun oneNestedReplyCanOpenDetails() = assertNestedRepliesCanOpenDetails(1)
 
     @Test
@@ -197,6 +263,20 @@ class ThreadScreenTest {
 
     @Test
     fun threeNestedRepliesCanOpenDetails() = assertNestedRepliesCanOpenDetails(3)
+
+    @Test
+    fun replyCountWithoutPreviewStillOpensNestedComments() {
+        val parent = replyPost(id = 2uL, floor = 2, previewSubposts = emptyList(), subpostCount = 3)
+        var openedPostId: ULong? = null
+        composeRule.setContent {
+            TiebaPureTheme {
+                TestThreadScreen(state = threadState(posts = listOf(parent)),
+                    onOpenSubposts = { openedPostId = it.id })
+            }
+        }
+        composeRule.onNodeWithText("查看全部3条回复").performScrollTo().performClick()
+        composeRule.runOnIdle { assertEquals(parent.id, openedPostId) }
+    }
 
     private fun assertNestedRepliesCanOpenDetails(count: Int) {
         val parent = replyPost(
@@ -214,10 +294,8 @@ class ThreadScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("查看全部${count}条回复")
-            .performScrollTo()
-            .assertIsDisplayed()
-            .performClick()
+        composeRule.onAllNodesWithTag("thread-subpost-open-all")[0]
+            .performScrollTo().assertIsDisplayed().performClick()
 
         composeRule.runOnIdle { assertEquals(parent.id, openedPostId) }
     }

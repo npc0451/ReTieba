@@ -120,21 +120,25 @@ class SearchViewModel private constructor(
     private val scope: SearchScope = SearchScope.Global,
     initialKeyword: String = "",
     coroutineScope: CoroutineScope?,
+    initialFilter: SearchFilter? = null,
 ) : ViewModel() {
     constructor(
         repository: SearchRepository,
         scope: SearchScope = SearchScope.Global,
         initialKeyword: String = "",
-    ) : this(repository, scope, initialKeyword, coroutineScope = null)
+        initialFilter: SearchFilter? = null,
+    ) : this(repository, scope, initialKeyword, coroutineScope = null, initialFilter = initialFilter)
 
     internal constructor(
         repository: SearchRepository,
         coroutineScope: CoroutineScope,
         scope: SearchScope = SearchScope.Global,
-    ) : this(repository, scope, initialKeyword = "", coroutineScope)
+        initialFilter: SearchFilter? = null,
+    ) : this(repository, scope, initialKeyword = "", coroutineScope, initialFilter)
 
     private val _uiState = MutableStateFlow(
-        SearchUiState(scope = scope, input = initialKeyword, submittedKeyword = initialKeyword.trim()),
+        SearchUiState(scope = scope, input = initialKeyword, submittedKeyword = initialKeyword.trim(),
+            filter = initialFilter?.takeIf { it in scope.availableFilters } ?: scope.availableFilters.first()),
     )
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
     private val modelScope = coroutineScope ?: viewModelScope
@@ -338,6 +342,9 @@ internal fun mergeSearchItems(existing: List<SearchItem>, incoming: List<SearchI
 }
 
 data class SearchCallbacks(
+    val isLocallySubscribed: (Forum) -> Boolean = { false },
+    val onToggleLocalSubscription: ((Forum) -> Unit)? = null,
+    val localSubscriptionUpdating: Boolean = false,
     val onBack: () -> Unit = {},
     val onOpenThread: (SearchItem.ThreadResult) -> Unit = {},
     val onOpenUser: (UserSummary) -> Unit = {},

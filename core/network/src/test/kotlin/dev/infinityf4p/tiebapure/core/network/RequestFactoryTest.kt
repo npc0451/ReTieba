@@ -14,6 +14,18 @@ import kotlin.test.assertTrue
 
 class RequestFactoryTest {
     @Test
+    fun publicUserForumsNeverCarriesAccountCredentials() {
+        val request = TiebaReadRequestFactory.publicUserForums(42, 3, testRequestBuilder())
+        val fields = request.formFields()
+        assertEquals(EndpointAccess.AnonymousRead, request.tag(TiebaEndpoint::class.java)?.access)
+        assertEquals("42", fields["friend_uid"])
+        assertEquals("3", fields["page_no"])
+        assertEquals("50", fields["page_size"])
+        assertNull(fields["BDUSS"])
+        assertNull(fields["stoken"])
+        assertEquals(TiebaFormSigner.sign(fields - "sign"), fields["sign"])
+    }
+    @Test
     fun followedForumsUsesSignedPaginationFields() {
         val request = TiebaReadRequestFactory.followedForums(testAccount(), 2, testRequestBuilder())
         val fields = request.formFields()

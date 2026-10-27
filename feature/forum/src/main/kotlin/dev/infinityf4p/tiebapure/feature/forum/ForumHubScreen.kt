@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AlertDialog
@@ -52,6 +53,7 @@ fun ForumHubRoute(
     viewModel: ForumHubViewModel,
     onOpenForum: (Forum) -> Unit,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     ForumHubScreen(
@@ -61,6 +63,7 @@ fun ForumHubRoute(
         onRemoveRecent = viewModel::removeRecent,
         onClearRecent = viewModel::clearRecent,
         modifier = modifier,
+        onBack = onBack,
     )
 }
 
@@ -73,6 +76,7 @@ fun ForumHubScreen(
     onRemoveRecent: (Forum) -> Unit,
     onClearRecent: () -> Unit,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
 ) {
     var forumInput by remember { mutableStateOf("") }
     var managesRecent by remember { mutableStateOf(false) }
@@ -103,13 +107,16 @@ fun ForumHubScreen(
     }
     val sections = buildList {
         if (uiState.recentForums.isNotEmpty()) add(ForumHubSection.Recent)
-        add(ForumHubSection.Followed)
+        if (uiState.followedForums.isNotEmpty()) add(ForumHubSection.Followed)
     }
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
             modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-        ) { Text("进吧", style = MaterialTheme.typography.titleLarge) }
+        ) {
+            onBack?.let { back -> IconButton(onClick = back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") } }
+            Text("进吧", style = MaterialTheme.typography.titleLarge)
+        }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         PullToRefreshBox(
             isRefreshing = uiState.isRefreshing,
