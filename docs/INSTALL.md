@@ -2,7 +2,7 @@
 
 支持 Android 6.0（API 23）及以上。
 
-在 [GitHub Releases](https://github.com/npc0451/TiebaPure-Android/releases/tag/v1.0.0-rc.3) 下载 `ReTieba-1.0.0-rc.3-candidate.apk`。这是首次公开的预发布版本，关闭调试并启用 R8 压缩，版本码为 25。
+在 [GitHub Releases](https://github.com/npc0451/ReTieba/releases/tag/v1.0.0-rc.3) 下载 `ReTieba-1.0.0-rc.3-candidate.apk`。这是首次公开版本，关闭调试并启用 R8 压缩，版本码为 25。
 
 下载后允许浏览器或文件管理器安装应用，再打开 APK。可用同页提供的 `SHA256SUMS.txt` 核对文件完整性。
 

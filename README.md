@@ -45,7 +45,7 @@ ReTieba 基于 [TiebaPure-Android](https://github.com/infinityf4p/TiebaPure-Andr
 
 ## 安装
 
-支持 **Android 6.0（API 23）及以上**。首个公开版本为 **1.0.0-rc.3 预发布版**，在 [GitHub Releases](https://github.com/npc0451/TiebaPure-Android/releases/tag/v1.0.0-rc.3) 下载 APK。安装与升级方式见[安装说明](docs/INSTALL.md)，更新内容见[版本说明](docs/releases/1.0.0-rc.3.md)。
+支持 **Android 6.0（API 23）及以上**。首个公开版本为 **1.0.0-rc.3**，在 [GitHub Releases](https://github.com/npc0451/ReTieba/releases/tag/v1.0.0-rc.3) 下载 APK。安装与升级方式见[安装说明](docs/INSTALL.md)，更新内容见[版本说明](docs/releases/1.0.0-rc.3.md)。
 
 ## 构建
 

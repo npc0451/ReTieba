@@ -2,7 +2,7 @@
 
 ## 当前公开版本
 
-首个公开版本为 `1.0.0-rc.3`，标签 `v1.0.0-rc.3`，在本项目 [GitHub Releases](https://github.com/npc0451/TiebaPure-Android/releases) 以预发布形式提供。
+首个公开版本为 `1.0.0-rc.3`，标签 `v1.0.0-rc.3`，在本项目 [GitHub Releases](https://github.com/npc0451/ReTieba/releases) 以正式 Release 形式提供。
 
 本次可安装 APK 使用 optimized 构建，关闭调试并开启 R8，沿用开发签名与 `dev.infinityf4p.tiebapure.reader` 安装标识。公开候选包不等于长期正式签名版本。
 
