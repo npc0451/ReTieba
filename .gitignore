@@ -35,3 +35,8 @@ hs_err_pid*.log
 replay_pid*.log
 .local-signing/
 *.hprof
+
+# Local design drafts (not release source)
+/design/
+*.docx
+*.pptx

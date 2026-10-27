@@ -41,8 +41,8 @@ android {
         applicationId = "dev.infinityf4p.tiebapure.reader"
         minSdk = 23
         targetSdk = 36
-        versionCode = 24
-        versionName = "1.0.0-rc.2"
+        versionCode = 25
+        versionName = "1.0.0-rc.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

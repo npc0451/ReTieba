@@ -41,9 +41,11 @@ ReTieba 基于 [TiebaPure-Android](https://github.com/infinityf4p/TiebaPure-Andr
 
 应用只读公开内容，点赞显示真实数量。订阅、关注和收藏保存在本机，不与贴吧账号同步。
 
+当前版本通过关闭登录、发帖、回复等入口、切断相关调用，并在应用 API 客户端拦截认证和写请求，实现匿名只读。上游的部分账号、消息和写操作源码仍保留在工程中，尚未全面清理。
+
 ## 安装
 
-支持 **Android 6.0（API 23）及以上**。当前为 **1.0.0-rc.2** 候选版（[项目仓库](https://github.com/npc0451/TiebaPure-Android)），安装与升级方式见[安装说明](docs/INSTALL.md)，更新内容见[版本说明](docs/releases/1.0.0-rc.2.md)。
+支持 **Android 6.0（API 23）及以上**。首个公开版本为 **1.0.0-rc.3 预发布版**，在 [GitHub Releases](https://github.com/npc0451/TiebaPure-Android/releases/tag/v1.0.0-rc.3) 下载 APK。安装与升级方式见[安装说明](docs/INSTALL.md)，更新内容见[版本说明](docs/releases/1.0.0-rc.3.md)。
 
 ## 构建
 
@@ -57,7 +59,7 @@ Windows 使用 `gradlew.bat`。项目结构、测试和签名说明见[开发文
 
 ## 来源与许可
 
-ReTieba 修改自 [infinityf4p/TiebaPure-Android](https://github.com/infinityf4p/TiebaPure-Android)，沿用 [GPL-3.0-only](LICENSE)。项目以只读阅读和本地订阅为重点。
+ReTieba 修改自 [infinityf4p/TiebaPure-Android](https://github.com/infinityf4p/TiebaPure-Android)，沿用 [GPL-3.0-only](LICENSE)。自 2026 年 10 月起在上游 `d7e3988` 基础上改造，以只读阅读和本地订阅为重点。
 
 感谢上游作者提供的网络、媒体、离线阅读和自适应布局实现，也保留上游对 [TiebaLite](https://github.com/HuanCheng65/TiebaLite) 与 [aiotieba](https://github.com/lumina37/aiotieba) 的致谢。第三方组件与字体许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 [LICENSES](LICENSES)。
 
